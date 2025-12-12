@@ -2,28 +2,24 @@ version: 2
 updates:
   # Monitor Python dependencies
   - package-ecosystem: "pip"
-    directory: "/api"
+    directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 5
     groups:
       security-updates:
         patterns:
           - "*"
-        update-types:
-          - "security"
     labels:
-      - "dependencies"
+      - "python"
       - "security"
 
   # Monitor Docker base images
   - package-ecosystem: "docker"
-    directory: "/api"
+    directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 3
+      interval: "daily"
+    open-pull-requests-limit: 5
     labels:
       - "docker"
       - "security"
@@ -32,6 +28,34 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "daily"
+    open-pull-requests-limit: 5
+    groups:
+      all-actions:
+        patterns: [ "*" ]
     labels:
       - "github-actions"
+
+  # Enable version updates for npm
+  - package-ecosystem: "npm"
+    # Look for `package.json` and `lock` files in the `root` directory
+    directory: "/"
+    # Check the npm registry for updates every day (weekdays)
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    labels:
+      - "npm"
+      - "security"
+
+
+  - package-ecosystem: "terraform"
+    directory: "/" # Dependabot doesn't recursively search for directories
+    schedule:
+      interval: "daily" # weekdays only
+    open-pull-requests-limit: 5 
+    allow:
+      - dependency-type: "all"
+    labels:
+      - "terraform"
+      - "security"
