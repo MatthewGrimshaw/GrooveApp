@@ -1,0 +1,241 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    // Python API tasks
+    {
+      "label": "API: Start FastAPI",
+      "type": "shell",
+      "command": "uvicorn",
+      "args": [
+        "main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/api",
+        "env": {
+          "SQL_SERVER": "${env:SQL_SERVER}",
+          "SQL_DATABASE": "${env:SQL_DATABASE}"
+        }
+      },
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "api"
+      }
+    },
+    {
+      "label": "API: Install Dependencies",
+      "type": "shell",
+      "command": "pip",
+      "args": [
+        "install",
+        "-r",
+        "requirements.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/api"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "API: Run Tests",
+      "type": "shell",
+      "command": "pytest",
+      "args": [
+        "-v"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/api"
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "API: Build Docker",
+      "type": "shell",
+      "command": "docker",
+      "args": [
+        "build",
+        "-t",
+        "grooveapp-api",
+        "."
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/api"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "API: Test Deployment",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-File",
+        "test_deployment.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/api"
+      },
+      "problemMatcher": []
+    },
+    
+    // Angular Frontend tasks
+    {
+      "label": "Frontend: Start Dev Server",
+      "type": "npm",
+      "script": "start",
+      "path": "app/",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "pattern": "$tsc",
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": {
+            "regexp": "(.*?)"
+          },
+          "endsPattern": {
+            "regexp": "Application bundle generation complete|Compiled successfully"
+          }
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "frontend"
+      }
+    },
+    {
+      "label": "Frontend: Install Dependencies",
+      "type": "npm",
+      "script": "install",
+      "path": "app/",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Build Production",
+      "type": "npm",
+      "script": "build:prod",
+      "path": "app/",
+      "problemMatcher": ["$tsc"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Frontend: Run Tests",
+      "type": "npm",
+      "script": "test",
+      "path": "app/",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Build Docker",
+      "type": "shell",
+      "command": "docker",
+      "args": [
+        "build",
+        "-t",
+        "grooveapp-frontend",
+        "."
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/app"
+      },
+      "problemMatcher": []
+    },
+    
+    // Azure Infrastructure tasks
+    {
+      "label": "Azure: Deploy Infrastructure",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-File",
+        "build-appInfra.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/infra"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Azure: Deploy Updates",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-File",
+        "deploy-updates.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/infra"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Azure: Cleanup Infrastructure",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-File",
+        "cleanup-appInfra.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/infra"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Azure: Setup Database",
+      "type": "shell",
+      "command": "sqlcmd",
+      "args": [
+        "-S",
+        "${input:sqlServer}",
+        "-d",
+        "${input:sqlDatabase}",
+        "-G",
+        "-i",
+        "setup-music-tables.sql"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/infra"
+      },
+      "problemMatcher": []
+    },
+    
+    // Combined tasks
+    {
+      "label": "Start Full Stack (API + Frontend)",
+      "dependsOn": [
+        "API: Start FastAPI",
+        "Frontend: Start Dev Server"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "sqlServer",
+      "type": "promptString",
+      "description": "SQL Server name (e.g., sql-grooveapp.database.windows.net)",
+      "default": "sql-grooveapp.database.windows.net"
+    },
+    {
+      "id": "sqlDatabase",
+      "type": "promptString",
+      "description": "SQL Database name",
+      "default": "db-grooveapp"
+    }
+  ]
+}

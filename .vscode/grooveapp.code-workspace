@@ -1,0 +1,102 @@
+{
+  "folders": [
+    {
+      "name": "GrooveApp (Root)",
+      "path": ".."
+    },
+    {
+      "name": "API (Python/FastAPI)",
+      "path": "../api"
+    },
+    {
+      "name": "Frontend (Angular)",
+      "path": "../app"
+    },
+    {
+      "name": "Infrastructure (Azure/SQL)",
+      "path": "../infra"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/.DS_Store": true,
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/node_modules": true,
+      "**/.angular": true,
+      "**/dist": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/__pycache__": true,
+      "**/.venv": true,
+      "**/.angular": true
+    }
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: FastAPI",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": [
+          "main:app",
+          "--reload",
+          "--host",
+          "0.0.0.0",
+          "--port",
+          "8000"
+        ],
+        "cwd": "${workspaceFolder:API (Python/FastAPI)}",
+        "env": {
+          "SQL_SERVER": "${env:SQL_SERVER}",
+          "SQL_DATABASE": "${env:SQL_DATABASE}",
+          "FRONTEND_URL": "http://localhost:4200"
+        }
+      },
+      {
+        "name": "Angular: Chrome",
+        "type": "chrome",
+        "request": "launch",
+        "url": "http://localhost:4200",
+        "webRoot": "${workspaceFolder:Frontend (Angular)}"
+      }
+    ],
+    "compounds": [
+      {
+        "name": "Full Stack Debug",
+        "configurations": ["Python: FastAPI", "Angular: Chrome"]
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Start Full Stack",
+        "dependsOn": ["Start API", "Start Frontend"],
+        "problemMatcher": []
+      },
+      {
+        "label": "Start API",
+        "type": "shell",
+        "command": "uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+        "options": {
+          "cwd": "${workspaceFolder:API (Python/FastAPI)}"
+        },
+        "isBackground": true
+      },
+      {
+        "label": "Start Frontend",
+        "type": "npm",
+        "script": "start",
+        "path": "${workspaceFolder:Frontend (Angular)}",
+        "isBackground": true
+      }
+    ]
+  }
+}

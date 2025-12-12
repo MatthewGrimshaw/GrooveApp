@@ -1,0 +1,179 @@
+<div class="container">
+  <header>
+    <h1>🎵 {{ title }}</h1>
+    <div class="health-container">
+      <div class="health-status"
+           [class.healthy]="healthStatus?.includes('healthy')"
+           [class.unhealthy]="healthStatus?.includes('Unavailable')"
+           [class.warning]="healthStatus?.includes('failure')">
+        {{ healthStatus || 'Checking...' }}
+      </div>
+      <div class="health-details" *ngIf="healthDetails">
+        {{ healthDetails }}
+      </div>
+    </div>
+  </header>
+
+  <div class="error-message" *ngIf="error">
+    ⚠️ {{ error }}
+  </div>
+
+  <!-- Tab Navigation -->
+  <div class="tabs">
+    <button
+      class="tab"
+      [class.active]="activeTab === 'scales'"
+      (click)="setActiveTab('scales')">
+      Scales
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab === 'arpeggios'"
+      (click)="setActiveTab('arpeggios')">
+      Arpeggios
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab === 'intervals'"
+      (click)="setActiveTab('intervals')">
+      Intervals
+    </button>
+  </div>
+
+  <!-- Scales Tab -->
+  <div class="tab-content" *ngIf="activeTab === 'scales'">
+    <div class="controls">
+      <div class="control-group">
+        <label for="scale-note">Root Note:</label>
+        <select id="scale-note" [(ngModel)]="selectedNoteObj" (change)="generateScale()">
+          <option *ngFor="let note of notes" [ngValue]="note">
+            {{ note.NoteName }}
+          </option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="scale-type">Scale Type:</label>
+        <select id="scale-type" [(ngModel)]="selectedScaleTypeId" (change)="generateScale()">
+          <option *ngFor="let type of scaleTypes" [ngValue]="type.ScaleTypeId">
+            {{ type.ScaleName }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="result-card" *ngIf="currentScale">
+      <h2>{{ currentScale.RootNote }} {{ currentScale.ScaleName }}</h2>
+      <div class="notes-display">
+        <div class="note-with-numeral" *ngFor="let note of currentScale.Notes; let i = index">
+          <div class="roman-numeral">{{ currentScale.RomanNumerals[i] }}</div>
+          <div class="note">{{ note }}</div>
+        </div>
+      </div>
+      <div class="pattern">
+        <strong>Interval Pattern:</strong> {{ currentScale.IntervalPattern }}
+      </div>
+
+      <!-- Musical Staff Visualization -->
+      <div class="staff-container">
+        <h3>Staff Notation</h3>
+        <app-musical-staff [notes]="currentScale.Notes"></app-musical-staff>
+      </div>
+    </div>
+  </div>
+
+  <!-- Arpeggios Tab -->
+  <div class="tab-content" *ngIf="activeTab === 'arpeggios'">
+    <div class="controls">
+      <div class="control-group">
+        <label for="arpeggio-note">Root Note:</label>
+        <select id="arpeggio-note" [(ngModel)]="selectedNoteObj" (change)="generateArpeggio()">
+          <option *ngFor="let note of notes" [ngValue]="note">
+            {{ note.NoteName }}
+          </option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="chord-type">Chord Type:</label>
+        <select id="chord-type" [(ngModel)]="selectedChordTypeId" (change)="generateArpeggio()">
+          <option *ngFor="let type of chordTypes" [ngValue]="type.ChordTypeId">
+            {{ type.ChordName }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="result-card" *ngIf="currentArpeggio">
+      <h2>{{ currentArpeggio.RootNote }} {{ currentArpeggio.ChordName }}</h2>
+      <div class="arpeggio-layout">
+        <div class="arpeggio-notes">
+          <h3>Arpeggio Notes</h3>
+          <div class="notes-display">
+            <div class="note-with-numeral" *ngFor="let note of currentArpeggio.Notes; let i = index">
+              <div class="roman-numeral">{{ currentArpeggio.RomanNumerals[i] }}</div>
+              <div class="note">{{ note }}</div>
+            </div>
+          </div>
+          <div class="pattern">
+            <strong>Interval Pattern:</strong> {{ currentArpeggio.IntervalPattern }}
+          </div>
+        </div>
+
+        <!-- Chord Extensions Section -->
+        <div class="extensions-section" *ngIf="currentChordExtensions.length > 0">
+          <h3>Common Jazz Extensions</h3>
+          <div class="extensions-grid">
+            <div class="extension-item" *ngFor="let ext of currentChordExtensions">
+              <div class="extension-note">{{ ext.Note }}</div>
+              <div class="extension-symbol">{{ ext.ExtensionSymbol }}</div>
+              <div class="extension-name">{{ ext.ExtensionName }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Musical Staff Visualization -->
+      <div class="staff-container">
+        <h3>Staff Notation</h3>
+        <app-musical-staff [notes]="currentArpeggio.Notes"></app-musical-staff>
+      </div>
+    </div>
+  </div>
+
+  <!-- Intervals Tab -->
+  <div class="tab-content" *ngIf="activeTab === 'intervals'">
+    <div class="controls">
+      <div class="control-group">
+        <label for="interval-note">From Note:</label>
+        <select id="interval-note" [(ngModel)]="intervalFromNoteObj" (change)="showIntervalsFromNote()">
+          <option *ngFor="let note of notes" [ngValue]="note">
+            {{ note.NoteName }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="result-card" *ngIf="intervalsFromNote.length > 0">
+      <h2>Intervals from {{ intervalFromNoteObj?.NoteName || '' }}</h2>
+      <table class="intervals-table">
+        <thead>
+          <tr>
+            <th>To Note</th>
+            <th>Interval</th>
+            <th>Semitones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let interval of intervalsFromNote">
+            <td>{{ interval.ToNote }}</td>
+            <td>{{ interval.IntervalName }}</td>
+            <td>{{ interval.Semitones }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="loading" *ngIf="loading">Loading...</div>
+</div>

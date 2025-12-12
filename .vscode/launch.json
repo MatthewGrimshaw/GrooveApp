@@ -1,0 +1,87 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "jinja": true,
+      "cwd": "${workspaceFolder}/api",
+      "env": {
+        "SQL_SERVER": "${env:SQL_SERVER}",
+        "SQL_DATABASE": "${env:SQL_DATABASE}",
+        "FRONTEND_URL": "http://localhost:4200"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${fileDirname}"
+    },
+    {
+      "name": "Python: Pytest Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-v"
+      ],
+      "cwd": "${workspaceFolder}/api",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Angular: ng serve",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "Frontend: Start Dev Server",
+      "url": "http://localhost:4200/",
+      "webRoot": "${workspaceFolder}/app",
+      "sourceMapPathOverrides": {
+        "webpack:/*": "${webRoot}/*"
+      }
+    },
+    {
+      "name": "Angular: ng test",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "Frontend: Run Tests",
+      "url": "http://localhost:9876/debug.html",
+      "webRoot": "${workspaceFolder}/app"
+    },
+    {
+      "name": "PowerShell: Launch Script",
+      "type": "PowerShell",
+      "request": "launch",
+      "script": "${file}",
+      "cwd": "${fileDirname}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: API + Frontend",
+      "configurations": [
+        "Python: FastAPI",
+        "Angular: ng serve"
+      ],
+      "presentation": {
+        "hidden": false,
+        "group": "Full Stack",
+        "order": 1
+      }
+    }
+  ]
+}
