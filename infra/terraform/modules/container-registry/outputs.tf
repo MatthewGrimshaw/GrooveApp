@@ -3,6 +3,11 @@ output "id" {
   value       = azurerm_container_registry.main.id
 }
 
+output "registry_id" {
+  description = "ID of the Container Registry (alias for role assignments)"
+  value       = azurerm_container_registry.main.id
+}
+
 output "name" {
   description = "Name of the Container Registry"
   value       = azurerm_container_registry.main.name

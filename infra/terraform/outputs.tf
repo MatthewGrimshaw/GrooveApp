@@ -11,6 +11,7 @@ output "resource_group_location" {
   value       = azurerm_resource_group.main.location
 }
 
+
 # Database Outputs (conditional based on type)
 output "database_type" {
   description = "Type of database deployed"
@@ -38,6 +39,7 @@ output "database_name" {
     length(module.database_cosmos) > 0 ? module.database_cosmos[0].database_name : null
   ) : null
 }
+
 
 # Container Registry
 output "acr_login_server" {
@@ -96,23 +98,46 @@ output "frontend_identity_principal_id" {
 # Entra ID
 output "security_group_id" {
   description = "Object ID of the security group"
-  value       = module.entra_id.security_group_id
+  value       = var.enable_authentication ? module.entra_id[0].security_group_id : null
 }
 
 output "security_group_name" {
   description = "Name of the security group"
-  value       = module.entra_id.security_group_name
+  value       = var.enable_authentication ? module.entra_id[0].security_group_name : null
 }
 
 output "api_app_registration_id" {
   description = "Application (client) ID of the API app registration"
-  value       = module.entra_id.api_app_id
+  value       = var.enable_authentication ? module.entra_id[0].api_app_id : null
   sensitive   = true
 }
 
 output "frontend_app_registration_id" {
   description = "Application (client) ID of the Frontend app registration"
-  value       = module.entra_id.frontend_app_id
+  value       = var.enable_authentication ? module.entra_id[0].frontend_app_id : null
+  sensitive   = true
+}
+
+# Log Analytics and Monitoring
+output "log_analytics_workspace_id" {
+  description = "ID of the Log Analytics workspace"
+  value       = module.log_analytics.workspace_id
+}
+
+output "log_analytics_workspace_name" {
+  description = "Name of the Log Analytics workspace"
+  value       = module.log_analytics.workspace_name
+}
+
+output "application_insights_instrumentation_key" {
+  description = "Application Insights instrumentation key"
+  value       = module.log_analytics.app_insights_instrumentation_key
+  sensitive   = true
+}
+
+output "application_insights_connection_string" {
+  description = "Application Insights connection string"
+  value       = module.log_analytics.app_insights_connection_string
   sensitive   = true
 }
 
@@ -127,7 +152,9 @@ output "deployment_summary" {
     api_url            = "https://${module.api_web_app.default_hostname}"
     api_docs           = "https://${module.api_web_app.default_hostname}/docs"
     frontend_url       = "https://${module.frontend_web_app.default_hostname}"
-    security_group     = module.entra_id.security_group_name
+    security_group     = var.enable_authentication ? module.entra_id[0].security_group_name : "N/A - Authentication Disabled"
     container_registry = module.container_registry.login_server
+    log_analytics      = module.log_analytics.workspace_name
   }
 }
+

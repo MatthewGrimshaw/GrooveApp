@@ -1,57 +1,11 @@
 # GrooveApp Infrastructure
 # Main Terraform configuration
 
-terraform {
-  required_version = ">= 1.5.0"
-
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.80"
-    }
-    azuread = {
-      source  = "hashicorp/azuread"
-      version = "~> 2.45"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.5"
-    }
-  }
-
-  # Backend configuration for state storage
-  # Uncomment and configure for production use
-  # backend "azurerm" {
-  #   resource_group_name  = "rg-terraform-state"
-  #   storage_account_name = "stgrooveappstate"
-  #   container_name       = "tfstate"
-  #   key                  = "grooveapp.tfstate"
-  # }
+# Azure Naming Module
+module "naming" {
+  source = "./modules/naming"
+  suffix = [var.naming_prefix, var.environment]
 }
-
-provider "azurerm" {
-  features {
-    resource_group {
-      prevent_deletion_if_contains_resources = false
-    }
-    key_vault {
-      purge_soft_delete_on_destroy    = true
-      recover_soft_deleted_key_vaults = true
-    }
-  }
-
-  tenant_id       = var.tenant_id
-  subscription_id = var.subscription_id
-}
-
-provider "azuread" {
-  tenant_id = var.tenant_id
-}
-
-# Data sources
-data "azurerm_client_config" "current" {}
-
-data "azuread_client_config" "current" {}
 
 # Resource Group
 resource "azurerm_resource_group" "main" {
@@ -61,20 +15,25 @@ resource "azurerm_resource_group" "main" {
   tags = local.common_tags
 }
 
-# Local variables
-locals {
-  common_tags = merge(
-    var.tags,
-    {
-      Environment = var.environment
-      ManagedBy   = "Terraform"
-      Application = "GrooveApp"
-    }
-  )
+# Network Module
+module "network" {
+  source = "./modules/network"
 
-  # Database-specific naming
-  db_server_name = "${var.naming_prefix}-${var.database_type}-${var.environment}"
-  db_name        = "db-${var.naming_prefix}-${var.environment}"
+  vnet_name                      = module.naming.virtual_network.name
+  resource_group_name            = azurerm_resource_group.main.name
+  location                       = var.location
+  address_space                  = var.vnet_address_space
+  app_service_subnet_name        = "${module.naming.subnet.name}-appservice"
+  app_service_subnet_prefix      = var.app_service_subnet_prefix
+  private_endpoint_subnet_name   = "${module.naming.subnet.name}-privateendpoints"
+  private_endpoint_subnet_prefix = var.private_endpoint_subnet_prefix
+
+  enable_sql_dns         = var.database_type == "sql"
+  sql_dns_link_name      = "${module.naming.private_dns_zone.name}-sql-link"
+  enable_postgres_dns    = var.database_type == "postgres"
+  postgres_dns_link_name = "${module.naming.private_dns_zone.name}-postgres-link"
+
+  tags = local.common_tags
 }
 
 # Database Module (conditional based on database_type)
@@ -85,16 +44,32 @@ module "database_sql" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  sql_server_name = local.db_server_name
-  database_name   = local.db_name
+  server_name   = module.naming.mssql_server.name_unique
+  database_name = module.naming.mssql_database.name
 
-  admin_user_id           = var.sql_admin_user_id
-  admin_user_principal    = var.sql_admin_user_principal
-  admin_user_display_name = var.sql_admin_user_display_name
+  tenant_id            = var.tenant_id
+  admin_user_id        = var.sql_admin_user_id
+  admin_user_principal = var.sql_admin_user_principal
 
   sku_name = var.sql_sku_name
 
+  # Private Endpoint Configuration
+  enable_private_endpoint    = var.enable_private_endpoints
+  private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
+  private_dns_zone_id        = var.enable_private_endpoints ? module.network.sql_private_dns_zone_id : ""
+
+  # Deployment Access
+  allow_deployment_access = var.allow_deployment_access
+  deployment_ip_whitelist = var.deployment_ip_whitelist
+
+  # Log Analytics
+  log_analytics_workspace_id = module.log_analytics.workspace_id
+
   tags = local.common_tags
+
+  depends_on = [
+    module.network
+  ]
 }
 
 module "database_postgres" {
@@ -104,13 +79,16 @@ module "database_postgres" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  server_name   = local.db_server_name
-  database_name = local.db_name
+  server_name   = module.naming.postgresql_server.name_unique
+  database_name = module.naming.postgresql_database.name
 
   admin_username = var.postgres_admin_username
   admin_password = var.postgres_admin_password
 
   sku_name = var.postgres_sku_name
+
+  # Log Analytics
+  log_analytics_workspace_id = module.log_analytics.workspace_id
 
   tags = local.common_tags
 }
@@ -122,11 +100,28 @@ module "database_cosmos" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  account_name  = local.db_server_name
-  database_name = local.db_name
+  account_name  = module.naming.cosmosdb_account.name_unique
+  database_name = "${module.naming.mssql_database.name}-cosmos"
 
   consistency_level = var.cosmos_consistency_level
-  throughput        = var.cosmos_throughput
+  # throughput        = var.cosmos_throughput
+
+  # Log Analytics
+  log_analytics_workspace_id = module.log_analytics.workspace_id
+
+  tags = local.common_tags
+}
+
+# Log Analytics Workspace
+module "log_analytics" {
+  source = "./modules/log-analytics"
+
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.location
+
+  workspace_name    = module.naming.log_analytics_workspace.name_unique
+  app_insights_name = "${module.naming.application_insights.name}-grooveapp"
+  retention_in_days = var.log_retention_days
 
   tags = local.common_tags
 }
@@ -138,8 +133,9 @@ module "container_registry" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  acr_name = "${var.naming_prefix}acr${var.environment}"
-  sku      = var.acr_sku
+  registry_name              = module.naming.container_registry.name_unique
+  sku                        = var.acr_sku
+  log_analytics_workspace_id = module.log_analytics.workspace_id
 
   tags = local.common_tags
 }
@@ -151,28 +147,25 @@ module "app_service_plan" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  plan_name = "${var.naming_prefix}-plan-${var.environment}"
-
-  os_type  = "Linux"
-  sku_name = var.app_service_plan_sku
+  plan_name = module.naming.app_service_plan.name
+  sku_name  = var.app_service_plan_sku
 
   tags = local.common_tags
 }
 
-# Entra ID Configuration
+# Entra ID Configuration (optional)
 module "entra_id" {
+  count  = var.enable_authentication ? 1 : 0
   source = "./modules/entra-id"
 
   tenant_id           = var.tenant_id
-  security_group_name = "${var.naming_prefix}-users-${var.environment}"
+  app_name            = "appreg-${module.naming.app_service.name}"
+  security_group_name = "${module.naming.resource_group.name}-users"
+  owner_object_id     = data.azuread_client_config.current.object_id
 
-  api_app_name      = "${var.naming_prefix}-api-${var.environment}"
-  frontend_app_name = "${var.naming_prefix}-frontend-${var.environment}"
-
-  api_url      = "https://${var.naming_prefix}-api-${var.environment}.azurewebsites.net"
-  frontend_url = "https://${var.naming_prefix}-frontend-${var.environment}.azurewebsites.net"
-
-  initial_group_member_ids = var.initial_group_member_ids
+  api_url                   = "https://${module.naming.app_service.name}-api.azurewebsites.net"
+  frontend_url              = "https://${module.naming.app_service.name}-frontend.azurewebsites.net"
+  supports_deployment_slots = can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku))
 }
 
 # API Web App
@@ -182,12 +175,11 @@ module "api_web_app" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  app_name            = "${var.naming_prefix}-api-${var.environment}"
-  app_service_plan_id = module.app_service_plan.id
+  app_name        = "${module.naming.app_service.name}-api"
+  service_plan_id = module.app_service_plan.id
 
-  container_registry_url = module.container_registry.login_server
-  container_image_name   = "grooveapp-api"
-  container_image_tag    = var.api_image_tag
+  acr_login_server = module.container_registry.login_server
+  docker_image     = "grooveapp-api:${var.api_image_tag}"
 
   acr_username = module.container_registry.admin_username
   acr_password = module.container_registry.admin_password
@@ -195,8 +187,12 @@ module "api_web_app" {
   app_settings = merge(
     var.api_app_settings,
     {
-      WEBSITES_PORT = "8000"
-      FRONTEND_URL  = "https://${var.naming_prefix}-frontend-${var.environment}.azurewebsites.net"
+      WEBSITES_PORT                              = "8000"
+      FRONTEND_URL                               = "https://${module.naming.app_service.name}-frontend.azurewebsites.net"
+      APPLICATIONINSIGHTS_CONNECTION_STRING      = module.log_analytics.app_insights_connection_string
+      ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
+      # Logging configuration
+      LOG_LEVEL = var.log_level # OFF, ERROR, WARNING, INFO/ON, VERBOSE/DEBUG
     },
     # Database-specific connection settings
     var.database_type == "sql" ? {
@@ -216,18 +212,24 @@ module "api_web_app" {
 
   health_check_path = "/health"
 
-  cors_allowed_origins = [
-    "https://${var.naming_prefix}-frontend-${var.environment}.azurewebsites.net",
-    "http://localhost:8080",
-    "http://localhost:4200"
-  ]
+  # CORS configuration for API
+  cors_allowed_origins     = ["https://${module.naming.app_service.name}-frontend.azurewebsites.net"]
+  cors_support_credentials = true
 
   # Easy Auth configuration
-  auth_enabled        = var.enable_authentication
-  auth_app_id         = module.entra_id.api_app_id
-  auth_client_secret  = module.entra_id.api_client_secret
-  auth_tenant_id      = var.tenant_id
-  auth_excluded_paths = ["/health", "/docs", "/openapi.json"]
+  enable_authentication     = var.enable_authentication
+  supports_deployment_slots = can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku))
+  tenant_id                 = var.enable_authentication ? var.tenant_id : ""
+  client_id                 = var.enable_authentication ? module.entra_id[0].api_app_id : ""
+  client_secret             = var.enable_authentication ? module.entra_id[0].api_client_secret : ""
+  unauthenticated_action    = "Return401"
+
+  # VNet Integration for Private Endpoint access
+  enable_vnet_integration    = var.enable_private_endpoints
+  vnet_integration_subnet_id = module.network.app_service_subnet_id
+
+  # Log Analytics
+  log_analytics_workspace_id = module.log_analytics.workspace_id
 
   tags = local.common_tags
 }
@@ -239,12 +241,11 @@ module "frontend_web_app" {
   resource_group_name = azurerm_resource_group.main.name
   location            = var.location
 
-  app_name            = "${var.naming_prefix}-frontend-${var.environment}"
-  app_service_plan_id = module.app_service_plan.id
+  app_name        = "${module.naming.app_service.name}-frontend"
+  service_plan_id = module.app_service_plan.id
 
-  container_registry_url = module.container_registry.login_server
-  container_image_name   = "grooveapp-frontend"
-  container_image_tag    = var.frontend_image_tag
+  acr_login_server = module.container_registry.login_server
+  docker_image     = "grooveapp-frontend:${var.frontend_image_tag}"
 
   acr_username = module.container_registry.admin_username
   acr_password = module.container_registry.admin_password
@@ -252,20 +253,31 @@ module "frontend_web_app" {
   app_settings = merge(
     var.frontend_app_settings,
     {
-      API_URL = "https://${var.naming_prefix}-api-${var.environment}.azurewebsites.net"
+      API_URL                                    = "https://${module.naming.app_service.name}-api.azurewebsites.net"
+      APPLICATIONINSIGHTS_CONNECTION_STRING      = module.log_analytics.app_insights_connection_string
+      ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
+      # Logging configuration (same as backend)
+      LOG_LEVEL = var.log_level # OFF, ERROR, WARNING, INFO, DEBUG
+      # Nginx listens on port 8080 (not default 80)
+      WEBSITES_PORT = "8080"
     }
   )
 
   health_check_path = "/"
 
-  cors_allowed_origins = []
-
   # Easy Auth configuration
-  auth_enabled        = var.enable_authentication
-  auth_app_id         = module.entra_id.frontend_app_id
-  auth_client_secret  = module.entra_id.frontend_client_secret
-  auth_tenant_id      = var.tenant_id
-  auth_excluded_paths = []
+  enable_authentication     = var.enable_authentication
+  supports_deployment_slots = can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku))
+  tenant_id                 = var.enable_authentication ? var.tenant_id : ""
+  client_id                 = var.enable_authentication ? module.entra_id[0].frontend_app_id : ""
+  client_secret             = var.enable_authentication ? module.entra_id[0].frontend_client_secret : ""
+
+  # VNet Integration for private endpoint access
+  enable_vnet_integration    = var.enable_private_endpoints
+  vnet_integration_subnet_id = module.network.app_service_subnet_id
+
+  # Log Analytics
+  log_analytics_workspace_id = module.log_analytics.workspace_id
 
   tags = local.common_tags
 }
@@ -285,4 +297,18 @@ resource "azurerm_role_assignment" "api_to_cosmos" {
   scope                = module.database_cosmos[0].account_id
   role_definition_name = "DocumentDB Account Contributor"
   principal_id         = module.api_web_app.identity_principal_id
+}
+
+# Grant API Web App managed identity access to pull from ACR
+resource "azurerm_role_assignment" "api_to_acr" {
+  scope                = module.container_registry.registry_id
+  role_definition_name = "AcrPull"
+  principal_id         = module.api_web_app.identity_principal_id
+}
+
+# Grant Frontend Web App managed identity access to pull from ACR
+resource "azurerm_role_assignment" "frontend_to_acr" {
+  scope                = module.container_registry.registry_id
+  role_definition_name = "AcrPull"
+  principal_id         = module.frontend_web_app.identity_principal_id
 }

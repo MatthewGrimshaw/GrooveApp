@@ -1,26 +1,27 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { HttpClientModule } from '@angular/common/http';
-import { interval, Subscription } from 'rxjs';
-import { switchMap, catchError } from 'rxjs/operators';
-import { of } from 'rxjs';
-import { MusicApiService } from './services/music-api.service';
-import {
-  Note,
-  ScaleType,
-  Scale,
-  ChordType,
-  Arpeggio,
-  IntervalFromNote,
-  ChordExtension
-} from './models/music.models';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { interval, of, Subscription } from 'rxjs';
+import { catchError, switchMap } from 'rxjs/operators';
+import { CircleOfFifthsComponent } from './components/circle-of-fifths.component';
 import { MusicalStaffComponent } from './components/musical-staff.component';
+import {
+  Arpeggio,
+  ChordExtension,
+  ChordType,
+  IntervalFromNote,
+  Note,
+  Scale,
+  ScaleType
+} from './models/music.models';
+import { HttpLog, LoggingService } from './services/logging.service';
+import { MusicApiService } from './services/music-api.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, HttpClientModule, MusicalStaffComponent],
+  imports: [CommonModule, FormsModule, HttpClientModule, MusicalStaffComponent, CircleOfFifthsComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -55,26 +56,50 @@ export class AppComponent implements OnInit, OnDestroy {
   lastHealthCheck: Date | null = null;
   consecutiveHealthFailures = 0;
   maxHealthFailures = 3;
-  activeTab: 'scales' | 'arpeggios' | 'intervals' = 'scales';
+  activeTab: 'scales' | 'arpeggios' | 'intervals' | 'circle-of-fifths' = 'scales';
+
+  // Debug mode
+  debugMode = false;
+  debugInfo: string[] = [];
+  apiUrl = '';
+  httpLogs: HttpLog[] = [];
+  selectedHttpLog: HttpLog | null = null;
+  autoRefreshLogs = true;
+  private logRefreshInterval?: any;
 
   // Subscriptions
   private healthCheckSubscription?: Subscription;
 
-  constructor(private musicApi: MusicApiService) {}
+  constructor(
+    private musicApi: MusicApiService,
+    private loggingService: LoggingService
+  ) {}
 
   ngOnInit() {
+    // Get API URL for debugging
+    this.apiUrl = this.musicApi.getApiUrl();
+    this.addDebugInfo(`API URL: ${this.apiUrl}`);
+    this.addDebugInfo(`User Agent: ${navigator.userAgent}`);
+    this.addDebugInfo(`Current Time: ${new Date().toISOString()}`);
+
     // Load data without blocking the UI
     this.checkHealth();
     setTimeout(() => this.loadInitialData(), 100);
 
     // Start periodic health checks every 30 seconds
     this.startHealthMonitoring();
+
+    // Start HTTP log refresh
+    this.startLogRefresh();
   }
 
   ngOnDestroy() {
     // Clean up subscription when component is destroyed
     if (this.healthCheckSubscription) {
       this.healthCheckSubscription.unsubscribe();
+    }
+    if (this.logRefreshInterval) {
+      clearInterval(this.logRefreshInterval);
     }
   }
 
@@ -170,16 +195,20 @@ export class AppComponent implements OnInit, OnDestroy {
   loadInitialData() {
     this.loading = true;
     this.error = null;
+    this.addDebugInfo('Loading initial data...');
 
     // Load notes
     this.musicApi.getNotes().subscribe({
       next: (notes) => {
         this.notes = notes;
+        this.addDebugInfo(`✓ Loaded ${notes.length} notes`);
       },
       error: (err) => {
-        this.error = 'Failed to load notes. Is the API running on http://localhost:8000?';
+        const errorMsg = this.formatError(err);
+        this.error = `Failed to load notes: ${errorMsg}`;
+        this.addDebugInfo(`✗ Failed to load notes: ${JSON.stringify(err)}`);
         this.loading = false;
-        console.error(err);
+        console.error('Notes error:', err);
       }
     });
 
@@ -187,15 +216,18 @@ export class AppComponent implements OnInit, OnDestroy {
     this.musicApi.getScaleTypes().subscribe({
       next: (types) => {
         this.scaleTypes = types;
+        this.addDebugInfo(`✓ Loaded ${types.length} scale types`);
         this.loading = false;
         if (types.length > 0) {
           this.generateScale();
         }
       },
       error: (err) => {
-        this.error = 'Failed to load scale types. Is the API running on http://localhost:8000?';
+        const errorMsg = this.formatError(err);
+        this.error = `Failed to load scale types: ${errorMsg}`;
+        this.addDebugInfo(`✗ Failed to load scale types: ${JSON.stringify(err)}`);
         this.loading = false;
-        console.error(err);
+        console.error('Scale types error:', err);
       }
     });
 
@@ -203,13 +235,16 @@ export class AppComponent implements OnInit, OnDestroy {
     this.musicApi.getChordTypes().subscribe({
       next: (types) => {
         this.chordTypes = types;
+        this.addDebugInfo(`✓ Loaded ${types.length} chord types`);
         if (types.length > 0) {
           this.generateArpeggio();
         }
       },
       error: (err) => {
-        this.error = 'Failed to load chord types. Is the API running on http://localhost:8000?';
-        console.error(err);
+        const errorMsg = this.formatError(err);
+        this.error = `Failed to load chord types: ${errorMsg}`;
+        this.addDebugInfo(`✗ Failed to load chord types: ${JSON.stringify(err)}`);
+        console.error('Chord types error:', err);
       }
     });
   }
@@ -325,10 +360,86 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  setActiveTab(tab: 'scales' | 'arpeggios' | 'intervals') {
+  setActiveTab(tab: 'scales' | 'arpeggios' | 'intervals' | 'circle-of-fifths') {
     this.activeTab = tab;
     if (tab === 'intervals' && this.intervalsFromNote.length === 0) {
       this.showIntervalsFromNote();
     }
+  }
+
+  toggleDebugMode() {
+    this.debugMode = !this.debugMode;
+    this.addDebugInfo(`Debug mode ${this.debugMode ? 'enabled' : 'disabled'}`);
+  }
+
+  addDebugInfo(message: string) {
+    const timestamp = new Date().toISOString().substring(11, 23);
+    this.debugInfo.push(`[${timestamp}] ${message}`);
+    // Keep only last 50 entries
+    if (this.debugInfo.length > 50) {
+      this.debugInfo = this.debugInfo.slice(-50);
+    }
+  }
+
+  formatError(err: any): string {
+    if (err.status === 0) {
+      return 'Cannot connect to API - CORS or network error';
+    } else if (err.status) {
+      return `HTTP ${err.status}: ${err.statusText || err.message || 'Unknown error'}`;
+    } else if (err.message) {
+      return err.message;
+    }
+    return 'Unknown error';
+  }
+
+  clearDebugLog() {
+    this.debugInfo = [];
+    this.addDebugInfo('Debug log cleared');
+  }
+
+  testConnection() {
+    this.addDebugInfo('Testing API connection...');
+    this.checkHealth();
+  }
+
+  startLogRefresh() {
+    this.refreshHttpLogs();
+    // Refresh logs every second when debug mode is on
+    this.logRefreshInterval = setInterval(() => {
+      if (this.debugMode && this.autoRefreshLogs) {
+        this.refreshHttpLogs();
+      }
+    }, 1000);
+  }
+
+  refreshHttpLogs() {
+    this.httpLogs = this.loggingService.getHttpLogs();
+  }
+
+  clearHttpLogs() {
+    this.loggingService.clearHttpLogs();
+    this.httpLogs = [];
+    this.selectedHttpLog = null;
+    this.addDebugInfo('HTTP logs cleared');
+  }
+
+  selectHttpLog(log: HttpLog) {
+    this.selectedHttpLog = this.selectedHttpLog === log ? null : log;
+  }
+
+  getLogStatusClass(log: HttpLog): string {
+    if (log.type === 'error') return 'error';
+    if (log.type === 'response' && log.status && log.status >= 200 && log.status < 300) return 'success';
+    if (log.type === 'response' && log.status && log.status >= 400) return 'error';
+    return 'info';
+  }
+
+  formatTimestamp(date: Date): string {
+    return new Date(date).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+  }
+
+  formatJson(obj: any): string {
+    if (!obj) return 'N/A';
+    return JSON.stringify(obj, null, 2);
   }
 }

@@ -16,10 +16,6 @@ resource "azurerm_postgresql_flexible_server" "main" {
   backup_retention_days        = 7
   geo_redundant_backup_enabled = false
 
-  high_availability {
-    mode = "Disabled"
-  }
-
   tags = var.tags
 }
 
@@ -43,4 +39,22 @@ resource "azurerm_postgresql_flexible_server_configuration" "max_connections" {
   name      = "max_connections"
   server_id = azurerm_postgresql_flexible_server.main.id
   value     = "100"
+}
+
+# Diagnostic Settings for PostgreSQL Server
+resource "azurerm_monitor_diagnostic_setting" "postgres_server" {
+  name                       = "${var.server_name}-diagnostics"
+  target_resource_id         = azurerm_postgresql_flexible_server.main.id
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  # PostgreSQL logs
+  enabled_log {
+    category = "PostgreSQLLogs"
+  }
+
+  # Metrics
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
 }

@@ -1,28 +1,37 @@
-import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
-import {
-  Note,
-  Interval,
-  IntervalFromNote,
-  ScaleType,
-  Scale,
-  ScaleDegree,
-  ChordType,
-  Arpeggio,
-  ArpeggioDegree,
-  ChordExtension,
-  HealthCheck
-} from '../models/music.models';
 import { environment } from '../../environments/environment';
+import {
+    ArpeggioDegree,
+    ChordExtension,
+    ChordType,
+    HealthCheck,
+    Interval,
+    IntervalFromNote,
+    Note,
+    ScaleDegree,
+    ScaleType
+} from '../models/music.models';
+import { ConfigService } from './config.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class MusicApiService {
-  private apiUrl = environment.apiUrl;
+  private get apiUrl(): string {
+    return this.configService.apiUrl || environment.apiUrl;
+  }
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private configService: ConfigService
+  ) {}
+
+  // Get the current API URL for debugging
+  getApiUrl(): string {
+    return this.apiUrl;
+  }
 
   // Health Check
   getHealth(): Observable<HealthCheck> {

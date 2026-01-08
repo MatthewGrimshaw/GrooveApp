@@ -22,3 +22,20 @@ variable "tenant_id" {
   description = "Azure AD tenant ID"
   type        = string
 }
+
+variable "owner_object_id" {
+  description = "Object ID of the user to set as owner of app registrations"
+  type        = string
+}
+
+variable "supports_deployment_slots" {
+  description = "Whether deployment slots are supported (enables staging slot redirect URIs)"
+  type        = bool
+  default     = false
+}
+
+variable "supports_deployment_slots" {
+  description = "Whether deployment slots are supported (enables staging slot redirect URIs)"
+  type        = bool
+  default     = false
+}

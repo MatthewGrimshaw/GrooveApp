@@ -2,7 +2,7 @@
 GrooveApp Music Theory API
 FastAPI application for querying music theory data from Azure SQL Database
 """
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import pyodbc
@@ -14,6 +14,20 @@ from pydantic import BaseModel
 from azure.identity import DefaultAzureCredential
 import struct
 
+# Import logging configuration
+from logging_config import configure_logging, create_audit_log
+from logging_middleware import RequestLoggingMiddleware, DatabaseLoggingMiddleware
+
+# Initialize logger
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')  # OFF, ERROR, WARNING, INFO/ON, VERBOSE/DEBUG
+APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv('APPLICATIONINSIGHTS_CONNECTION_STRING')
+
+logger = configure_logging(
+    app_insights_connection_string=APPLICATIONINSIGHTS_CONNECTION_STRING,
+    log_level=LOG_LEVEL,
+    service_name='grooveapp-api'
+)
+
 # Helper function to fix Unicode decoding issues with pyodbc
 def fix_unicode(s):
     """Fix Unicode characters that pyodbc may have decoded incorrectly"""
@@ -22,11 +36,24 @@ def fix_unicode(s):
     if isinstance(s, str):
         # pyodbc with ODBC Driver 18 sometimes fails to decode certain Unicode characters
         # from SQL Server NVARCHAR columns, replacing them with '?'
-        # We know the only special character should be the flat symbol ♭ (U+266D)
-        # Workaround: replace the malformed character with the correct Unicode
+        # We know the special characters should be:
+        # - flat symbol ♭ (U+266D)
+        # - sharp symbol # (ASCII 0x23) or ♯ (U+266F)
+        # - degree symbol ° (U+00B0)
+        
+        # Replace malformed character with flat symbol
         if '?' in s and len(s) > 1:
             # Likely a roman numeral with flat: ?II, ?III, ?V, ?VI, ?VII
             return s.replace('?', '♭')
+        
+        # Fix corrupted degree symbol: The database stores UTF-8 bytes (C2 B0) as Latin-1 characters
+        # When read back, C2 appears as 'Â' and B0 as '°', resulting in 'Â°'
+        # Replace 'Â°' with proper degree symbol '°'
+        if 'Â°' in s:
+            s = s.replace('Â°', '°')
+        
+        # Note: Sharp (#) is standard ASCII and should not need fixing
+        # But we'll ensure it's preserved
         return s
     return s
 
@@ -99,6 +126,30 @@ class NoteInterval(BaseModel):
     IntervalName: Optional[str]
     IntervalShortName: Optional[str]
 
+class CircleOfFifthsKey(BaseModel):
+    KeySignatureId: int
+    RootNote: str
+    ScaleTypeId: int
+    ScaleName: str
+    PreferredAccidental: str
+    Description: Optional[str]
+    AccidentalCount: int
+    AccidentalType: str
+    CirclePosition: int
+    RelativeKey: Optional[str]
+
+class DiatonicChord(BaseModel):
+    ProgressionId: int
+    KeyNote: str
+    ScaleTypeId: int
+    DegreeNumber: int
+    DegreeRomanNumeral: str
+    ChordRoot: str
+    ChordQuality: str
+    ChordSymbol: str
+    IntervalFromTonic: int
+    Description: Optional[str]
+
 # FastAPI app
 app = FastAPI(
     title="GrooveApp Music Theory API",
@@ -106,11 +157,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Add request logging middleware
+app.add_middleware(RequestLoggingMiddleware, logger=logger)
+
 # CORS middleware
 # Allow both localhost (development) and Azure frontend (production)
 allowed_origins = [
     "http://localhost:8080",
     "http://localhost:4200",
+    "http://host.docker.internal:8080",  # Docker container accessing host
     os.environ.get("FRONTEND_URL", "https://webapp-grooveapp-frontend.azurewebsites.net")
 ]
 app.add_middleware(
@@ -119,6 +174,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+logger.info(
+    "API startup complete",
+    extra={
+        'operation_id': 'startup',
+        'request_path': '/startup',
+        'log_level': LOG_LEVEL,
+        'app_insights_enabled': bool(APPLICATIONINSIGHTS_CONNECTION_STRING)
+    }
 )
 
 # Database connection
@@ -139,8 +204,11 @@ def get_access_token():
 
 def get_db_connection():
     """Create database connection using Entra ID authentication"""
-    server = os.environ.get('SQL_SERVER', 'sql-grooveapp.database.windows.net')
-    database = os.environ.get('SQL_DATABASE', 'db-grooveapp')
+    server = os.environ.get('SQL_SERVER')
+    database = os.environ.get('SQL_DATABASE')
+    
+    if not server or not database:
+        raise ValueError("SQL_SERVER and SQL_DATABASE environment variables must be set")
     
     try:
         # Get access token
@@ -150,31 +218,56 @@ def get_db_connection():
         token_bytes = access_token.encode('UTF-16-LE')
         token_struct = struct.pack(f'<I{len(token_bytes)}s', len(token_bytes), token_bytes)
         
-        # Connect using ODBC Driver 18 (or 17) with access token attribute
-        # Try Driver 18 first, fall back to 17
-        drivers = ['ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server']
-        conn = None
-        
-        for driver in drivers:
-            try:
-                conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes'
-                # SQL_COPT_SS_ACCESS_TOKEN = 1256
-                conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
-                break
-            except pyodbc.Error:
-                continue
-        
-        if not conn:
-            raise Exception("Could not connect with ODBC Driver 17 or 18")
+        # Connect using ODBC Driver 18 with access token attribute
+        try:
+            driver = 'ODBC Driver 18 for SQL Server'
+            conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes'
+            # SQL_COPT_SS_ACCESS_TOKEN = 1256
+            conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
+            return conn
+        except pyodbc.Error as e:
+            error_code = e.args[0] if e.args else 'Unknown'
+            error_msg = e.args[1] if len(e.args) > 1 else str(e)
             
-        return conn
+            # Provide helpful error messages for common issues
+            if error_code == '28000' and 'Login failed' in error_msg:
+                # Determine if it's a token expiration or permission issue
+                if 'Token is expired' in error_msg:
+                    raise Exception(
+                        f"Database authentication failed: {error_msg}\n\n"
+                        "Your Azure AD access token has expired.\n\n"
+                        "To fix this:\n"
+                        "1. Restart the API container/service to get a fresh token\n"
+                        "2. Or manually refresh your Azure CLI login: az login"
+                    )
+                else:
+                    raise Exception(
+                        f"Database authentication failed: {error_msg}\n\n"
+                        "Your Azure AD user doesn't have permission to access the database.\n"
+                        "Even though you're an Entra ID admin on the SQL Server, you need to be added as a user in the database.\n\n"
+                        "To fix this:\n"
+                        "1. Get your email: az ad signed-in-user show --query userPrincipalName -o tsv\n"
+                        "2. Edit infra/setup-music-tables.sql and set @DeveloperEmail to your email\n"
+                        "3. Run: sqlcmd -S {server} -d {database} -G -i infra/setup-music-tables.sql"
+                    )
+            else:
+                raise Exception(f"Database connection failed ({error_code}): {error_msg}")
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
 
 # Health check
 @app.get("/", tags=["Health"])
-async def root():
+async def root(request: Request):
     """Health check endpoint"""
+    logger.info(
+        "Root endpoint accessed",
+        extra={
+            'operation_id': getattr(request.state, 'operation_id', 'N/A'),
+            'user_id': getattr(request.state, 'user_id', 'anonymous'),
+            'request_path': '/'
+        }
+    )
     return {
         "status": "healthy",
         "service": "GrooveApp Music Theory API",
@@ -182,12 +275,14 @@ async def root():
     }
 
 @app.get("/health", tags=["Health"])
-async def health_check():
+async def health_check(request: Request):
     """Comprehensive health check with detailed diagnostics"""
     import time
     from datetime import datetime, timedelta
     
     start_time = time.time()
+    operation_id = getattr(request.state, 'operation_id', 'N/A')
+    
     health_response = {
         "status": "healthy",
         "database": "connected",
@@ -199,18 +294,41 @@ async def health_check():
     # Database connectivity check
     try:
         db_start = time.time()
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.close()
-        conn.close()
+        
+        with DatabaseLoggingMiddleware(logger, "Health check DB connection", request):
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            
         db_time = (time.time() - db_start) * 1000
         
         health_response["checks"]["database"] = {
             "status": "healthy",
             "responseTimeMs": round(db_time, 2)
         }
+        
+        logger.debug(
+            "Health check passed",
+            extra={
+                'operation_id': operation_id,
+                'user_id': 'system',
+                'request_path': '/health',
+                'duration_ms': round(db_time, 2)
+            }
+        )
     except Exception as e:
+        logger.error(
+            f"Health check failed: {str(e)}",
+            extra={
+                'operation_id': operation_id,
+                'user_id': 'system',
+                'request_path': '/health',
+                'error': str(e)
+            },
+            exc_info=True
+        )
         health_response["status"] = "unhealthy"
         health_response["database"] = "disconnected"
         health_response["checks"]["database"] = {
@@ -521,6 +639,109 @@ async def generate_arpeggio(root_note: str, chord_type_id: int):
             raise HTTPException(status_code=404, detail=f"Arpeggio not found for {root_note} with type {chord_type_id}")
         
         return arpeggio_notes
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Circle of Fifths endpoints
+@app.get("/circle-of-fifths/keys", response_model=List[CircleOfFifthsKey], tags=["Circle of Fifths"])
+async def get_circle_of_fifths_keys(scale_type: Optional[int] = Query(None, description="Filter by scale type (1=Major, 2=Minor)")):
+    """Get all keys in the Circle of Fifths with sharp/flat counts and relative keys
+    
+    Examples:
+    - /circle-of-fifths/keys - All major and minor keys
+    - /circle-of-fifths/keys?scale_type=1 - Major keys only
+    - /circle-of-fifths/keys?scale_type=2 - Minor keys only
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if scale_type:
+            query = """
+                SELECT KeySignatureId, RootNote, ScaleTypeId, ScaleName, PreferredAccidental, 
+                       Description, AccidentalCount, AccidentalType, CirclePosition, RelativeKey
+                FROM dbo.vw_CircleOfFifthsKeys
+                WHERE ScaleTypeId = ?
+                ORDER BY CirclePosition
+            """
+            cursor.execute(query, scale_type)
+        else:
+            query = """
+                SELECT KeySignatureId, RootNote, ScaleTypeId, ScaleName, PreferredAccidental, 
+                       Description, AccidentalCount, AccidentalType, CirclePosition, RelativeKey
+                FROM dbo.vw_CircleOfFifthsKeys
+                ORDER BY ScaleTypeId, CirclePosition
+            """
+            cursor.execute(query)
+        
+        keys = []
+        for row in cursor.fetchall():
+            keys.append(CircleOfFifthsKey(
+                KeySignatureId=row[0],
+                RootNote=row[1],
+                ScaleTypeId=row[2],
+                ScaleName=row[3],
+                PreferredAccidental=row[4],
+                Description=row[5],
+                AccidentalCount=row[6],
+                AccidentalType=row[7],
+                CirclePosition=row[8],
+                RelativeKey=row[9]
+            ))
+        
+        cursor.close()
+        conn.close()
+        return keys
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/circle-of-fifths/progression/{key_note}", response_model=List[DiatonicChord], tags=["Circle of Fifths"])
+async def get_chord_progression(
+    key_note: str, 
+    scale_type: int = Query(1, description="Scale type (1=Major, 2=Minor)")
+):
+    """Get the diatonic chord progression for a key (I-ii-iii-IV-V-vi-vii° for major)
+    
+    Examples:
+    - /circle-of-fifths/progression/C?scale_type=1 - C Major: C, Dm, Em, F, G, Am, B°
+    - /circle-of-fifths/progression/A?scale_type=2 - A Minor: Am, B°, C, Dm, Em, F, G
+    - /circle-of-fifths/progression/G?scale_type=1 - G Major: G, Am, Bm, C, D, Em, F#°
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT ProgressionId, KeyNote, ScaleTypeId, DegreeNumber, DegreeRomanNumeral,
+                   ChordRoot, ChordQuality, ChordSymbol, IntervalFromTonic, Description
+            FROM dbo.DiatonicChordProgressions
+            WHERE KeyNote = ? AND ScaleTypeId = ?
+            ORDER BY DegreeNumber
+        """, key_note, scale_type)
+        
+        chords = []
+        for row in cursor.fetchall():
+            chords.append(DiatonicChord(
+                ProgressionId=row[0],
+                KeyNote=fix_unicode(row[1]),
+                ScaleTypeId=row[2],
+                DegreeNumber=row[3],
+                DegreeRomanNumeral=fix_unicode(row[4]),
+                ChordRoot=fix_unicode(row[5]),
+                ChordQuality=row[6],
+                ChordSymbol=fix_unicode(row[7]),
+                IntervalFromTonic=row[8],
+                Description=row[9]
+            ))
+        
+        cursor.close()
+        conn.close()
+        
+        if not chords:
+            raise HTTPException(status_code=404, detail=f"Chord progression not found for {key_note} with scale type {scale_type}")
+        
+        return chords
     except HTTPException:
         raise
     except Exception as e:

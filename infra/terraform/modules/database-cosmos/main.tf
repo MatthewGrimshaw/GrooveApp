@@ -42,7 +42,7 @@ resource "azurerm_cosmosdb_sql_container" "notes" {
   resource_group_name   = var.resource_group_name
   account_name          = azurerm_cosmosdb_account.main.name
   database_name         = azurerm_cosmosdb_sql_database.main.name
-  partition_key_path    = "/noteId"
+  partition_key_paths   = ["/noteId"]
   partition_key_version = 1
 
   indexing_policy {
@@ -59,7 +59,7 @@ resource "azurerm_cosmosdb_sql_container" "chords" {
   resource_group_name   = var.resource_group_name
   account_name          = azurerm_cosmosdb_account.main.name
   database_name         = azurerm_cosmosdb_sql_database.main.name
-  partition_key_path    = "/chordTypeId"
+  partition_key_paths   = ["/chordTypeId"]
   partition_key_version = 1
 
   indexing_policy {
@@ -76,7 +76,7 @@ resource "azurerm_cosmosdb_sql_container" "chord_extensions" {
   resource_group_name   = var.resource_group_name
   account_name          = azurerm_cosmosdb_account.main.name
   database_name         = azurerm_cosmosdb_sql_database.main.name
-  partition_key_path    = "/chordTypeId"
+  partition_key_paths   = ["/chordTypeId"]
   partition_key_version = 1
 
   indexing_policy {
@@ -85,5 +85,39 @@ resource "azurerm_cosmosdb_sql_container" "chord_extensions" {
     included_path {
       path = "/*"
     }
+  }
+}
+
+# Diagnostic Settings for Cosmos DB Account
+resource "azurerm_monitor_diagnostic_setting" "cosmos_account" {
+  name                       = "${var.account_name}-diagnostics"
+  target_resource_id         = azurerm_cosmosdb_account.main.id
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  # Cosmos DB logs
+  enabled_log {
+    category = "DataPlaneRequests"
+  }
+
+  enabled_log {
+    category = "QueryRuntimeStatistics"
+  }
+
+  enabled_log {
+    category = "PartitionKeyStatistics"
+  }
+
+  enabled_log {
+    category = "PartitionKeyRUConsumption"
+  }
+
+  enabled_log {
+    category = "ControlPlaneRequests"
+  }
+
+  # Metrics
+  metric {
+    category = "Requests"
+    enabled  = true
   }
 }

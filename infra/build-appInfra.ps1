@@ -23,6 +23,7 @@ Write-Host ""
 
 # Authentication
 Write-Host "Step 1: Authenticating with Azure..." -ForegroundColor Cyan
+az config set core.login_experience_v2=off
 az login --tenant $tenantId
 az account set --subscription $subscriptionId
 Write-Host "Authentication successful`n" -ForegroundColor Green
@@ -114,18 +115,19 @@ try {
             Write-Host "  [$batchNum/$totalBatches] Executing batch..." -ForegroundColor Gray
             
             Invoke-Sqlcmd -ServerInstance "$($sqlServerName).database.windows.net" `
-                          -Database $databaseName `
-                          -AccessToken $accessToken `
-                          -Query $trimmedBatch `
-                          -ErrorAction Stop `
-                          -QueryTimeout 30
+                -Database $databaseName `
+                -AccessToken $accessToken `
+                -Query $trimmedBatch `
+                -ErrorAction Stop `
+                -QueryTimeout 30
             
             Write-Host "  [$batchNum/$totalBatches] Completed" -ForegroundColor Green
         }
     }
     
     Write-Host "Database populated successfully!`n" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "`nError executing batch $batchNum : $_" -ForegroundColor Red
     Write-Host "Error details: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
@@ -149,11 +151,14 @@ Write-Host "This may take a few minutes..." -ForegroundColor Yellow
 # Get script directory and workspace root (works both in script execution and line-by-line)
 $scriptPath = if ($PSScriptRoot) { 
     $PSScriptRoot 
-} elseif ($psISE) { 
+}
+elseif ($psISE) { 
     Split-Path -Parent $psISE.CurrentFile.FullPath 
-} elseif ($null -ne $psEditor) {
+}
+elseif ($null -ne $psEditor) {
     Split-Path -Parent $psEditor.GetEditorContext().CurrentFile.Path
-} else {
+}
+else {
     $PWD.Path
 }
 
@@ -176,10 +181,12 @@ try {
         exit 1
     }
     Write-Host "✅ Security scan passed - No HIGH or CRITICAL CVEs detected`n" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "Error during build/scan: $_" -ForegroundColor Red
     exit 1
-} finally {
+}
+finally {
     Pop-Location
 }
 
@@ -211,7 +218,8 @@ $existingGroup = az ad group list --filter "displayName eq '$entraIdGroupName'" 
 if ($existingGroup) {
     Write-Host "Security group already exists: $entraIdGroupName" -ForegroundColor Yellow
     $groupId = $existingGroup.id
-} else {
+}
+else {
     $newGroup = az ad group create `
         --display-name $entraIdGroupName `
         --mail-nickname "GrooveAppUsers" `
@@ -280,10 +288,10 @@ az webapp config appsettings set `
     --name $webAppName `
     --resource-group $resourceGroupName `
     --settings `
-        SQL_SERVER="$sqlServerName.database.windows.net" `
-        SQL_DATABASE=$databaseName `
-        WEBSITES_PORT=8000 `
-        FRONTEND_URL="https://$frontendWebAppName.azurewebsites.net" `
+    SQL_SERVER="$sqlServerName.database.windows.net" `
+    SQL_DATABASE=$databaseName `
+    WEBSITES_PORT=8000 `
+    FRONTEND_URL="https://$frontendWebAppName.azurewebsites.net" `
     --output none
 Write-Host "App settings configured`n" -ForegroundColor Green
 
@@ -303,7 +311,8 @@ if ($existingApp) {
     Write-Host "App registration already exists: $appRegName" -ForegroundColor Yellow
     $appId = $existingApp.appId
     $appObjectId = $existingApp.id
-} else {
+}
+else {
     # Create new app registration
     $appReg = az ad app create `
         --display-name $appRegName `
@@ -345,42 +354,42 @@ $webAppResourceId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGrou
 # Create auth settings JSON (save to temp file to avoid escaping issues)
 $authBody = @{
     properties = @{
-        platform = @{
+        platform          = @{
             enabled = $true
         }
-        globalValidation = @{
-            requireAuthentication = $true
+        globalValidation  = @{
+            requireAuthentication       = $true
             unauthenticatedClientAction = "Return401"
-            redirectToProvider = "azureActiveDirectory"
-            excludedPaths = @("/health", "/docs", "/openapi.json")
+            redirectToProvider          = "azureActiveDirectory"
+            excludedPaths               = @("/health", "/docs", "/openapi.json")
         }
         identityProviders = @{
-            azureActiveDirectory = @{
-                enabled = $true
+            azureActiveDirectory   = @{
+                enabled      = $true
                 registration = @{
-                    openIdIssuer = "https://sts.windows.net/$tenantId/"
-                    clientId = $appId
+                    openIdIssuer            = "https://sts.windows.net/$tenantId/"
+                    clientId                = $appId
                     clientSecretSettingName = "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET"
                 }
-                login = @{
+                login        = @{
                     loginParameters = @()
                 }
             }
-            apple = @{ enabled = $false }
-            facebook = @{ enabled = $false }
-            gitHub = @{ enabled = $false }
-            google = @{ enabled = $false }
+            apple                  = @{ enabled = $false }
+            facebook               = @{ enabled = $false }
+            gitHub                 = @{ enabled = $false }
+            google                 = @{ enabled = $false }
             legacyMicrosoftAccount = @{ enabled = $false }
-            twitter = @{ enabled = $false }
+            twitter                = @{ enabled = $false }
         }
-        login = @{
+        login             = @{
             tokenStore = @{
                 enabled = $true
             }
         }
-        httpSettings = @{
+        httpSettings      = @{
             requireHttps = $true
-            routes = @{
+            routes       = @{
                 apiPrefix = "/.auth"
             }
         }
@@ -436,11 +445,12 @@ $existingAssignments = az rest `
 
 if ($existingAssignments -and $existingAssignments.Count -gt 0) {
     Write-Host "Group already assigned to app" -ForegroundColor Yellow
-} else {
+}
+else {
     $groupAssignmentBody = @{
         principalId = $groupId
-        resourceId = $spObjectId
-        appRoleId = "00000000-0000-0000-0000-000000000000"
+        resourceId  = $spObjectId
+        appRoleId   = "00000000-0000-0000-0000-000000000000"
     }
 
     $groupAssignmentFile = [System.IO.Path]::GetTempFileName()
@@ -454,9 +464,11 @@ if ($existingAssignments -and $existingAssignments.Count -gt 0) {
             --body "@$groupAssignmentFile" `
             --output none 2>&1 | Out-Null
         Write-Host "Group assigned to app successfully" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Host "Warning: Could not assign group (may already be assigned): $($_.Exception.Message)" -ForegroundColor Yellow
-    } finally {
+    }
+    finally {
         Remove-Item -Path $groupAssignmentFile -Force -ErrorAction SilentlyContinue
     }
 }
@@ -508,12 +520,13 @@ ALTER ROLE db_datareader ADD MEMBER [$webAppName];
 
 try {
     Invoke-Sqlcmd -ServerInstance "$($sqlServerName).database.windows.net" `
-                  -Database $databaseName `
-                  -AccessToken $accessToken `
-                  -Query $createUserSql `
-                  -ErrorAction Stop
+        -Database $databaseName `
+        -AccessToken $accessToken `
+        -Query $createUserSql `
+        -ErrorAction Stop
     Write-Host "Database permissions granted successfully" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "Warning: Could not grant permissions automatically: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "You may need to run this SQL manually:" -ForegroundColor Yellow
     Write-Host $createUserSql -ForegroundColor Gray
@@ -659,8 +672,8 @@ az webapp config appsettings set `
     --name $frontendWebAppName `
     --resource-group $resourceGroupName `
     --settings `
-        WEBSITES_PORT=8080 `
-        API_URL="https://$webAppName.azurewebsites.net" `
+    WEBSITES_PORT=8080 `
+    API_URL="https://$webAppName.azurewebsites.net" `
     --output none
 Write-Host "Frontend app settings configured`n" -ForegroundColor Green
 
@@ -680,7 +693,8 @@ if ($existingFrontendApp) {
     Write-Host "Frontend app registration already exists: $frontendAppRegName" -ForegroundColor Yellow
     $frontendAppId = $existingFrontendApp.appId
     $frontendAppObjectId = $existingFrontendApp.id
-} else {
+}
+else {
     # Create new app registration for frontend
     $frontendAppReg = az ad app create `
         --display-name $frontendAppRegName `
@@ -718,41 +732,41 @@ $frontendWebAppResourceId = "/subscriptions/$subscriptionId/resourceGroups/$reso
 
 $frontendAuthBody = @{
     properties = @{
-        platform = @{
+        platform          = @{
             enabled = $true
         }
-        globalValidation = @{
-            requireAuthentication = $true
+        globalValidation  = @{
+            requireAuthentication       = $true
             unauthenticatedClientAction = "RedirectToLoginPage"
-            redirectToProvider = "azureActiveDirectory"
+            redirectToProvider          = "azureActiveDirectory"
         }
         identityProviders = @{
-            azureActiveDirectory = @{
-                enabled = $true
+            azureActiveDirectory   = @{
+                enabled      = $true
                 registration = @{
-                    openIdIssuer = "https://sts.windows.net/$tenantId/"
-                    clientId = $frontendAppId
+                    openIdIssuer            = "https://sts.windows.net/$tenantId/"
+                    clientId                = $frontendAppId
                     clientSecretSettingName = "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET"
                 }
-                login = @{
+                login        = @{
                     loginParameters = @()
                 }
             }
-            apple = @{ enabled = $false }
-            facebook = @{ enabled = $false }
-            gitHub = @{ enabled = $false }
-            google = @{ enabled = $false }
+            apple                  = @{ enabled = $false }
+            facebook               = @{ enabled = $false }
+            gitHub                 = @{ enabled = $false }
+            google                 = @{ enabled = $false }
             legacyMicrosoftAccount = @{ enabled = $false }
-            twitter = @{ enabled = $false }
+            twitter                = @{ enabled = $false }
         }
-        login = @{
+        login             = @{
             tokenStore = @{
                 enabled = $true
             }
         }
-        httpSettings = @{
+        httpSettings      = @{
             requireHttps = $true
-            routes = @{
+            routes       = @{
                 apiPrefix = "/.auth"
             }
         }
@@ -805,11 +819,12 @@ $existingFrontendAssignments = az rest `
 
 if ($existingFrontendAssignments -and $existingFrontendAssignments.Count -gt 0) {
     Write-Host "Group already assigned to frontend app" -ForegroundColor Yellow
-} else {
+}
+else {
     $frontendGroupAssignmentBody = @{
         principalId = $groupId
-        resourceId = $frontendSpObjectId
-        appRoleId = "00000000-0000-0000-0000-000000000000"
+        resourceId  = $frontendSpObjectId
+        appRoleId   = "00000000-0000-0000-0000-000000000000"
     }
 
     $frontendGroupAssignmentFile = [System.IO.Path]::GetTempFileName()
@@ -823,9 +838,11 @@ if ($existingFrontendAssignments -and $existingFrontendAssignments.Count -gt 0) 
             --body "@$frontendGroupAssignmentFile" `
             --output none 2>&1 | Out-Null
         Write-Host "Group assigned to frontend app successfully" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Host "Warning: Could not assign group (may already be assigned): $($_.Exception.Message)" -ForegroundColor Yellow
-    } finally {
+    }
+    finally {
         Remove-Item -Path $frontendGroupAssignmentFile -Force -ErrorAction SilentlyContinue
     }
 }

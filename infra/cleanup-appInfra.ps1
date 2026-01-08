@@ -34,6 +34,7 @@ Write-Host ""
 
 # Authentication
 Write-Host "Step 1: Authenticating with Azure..." -ForegroundColor Cyan
+az config set core.login_experience_v2=off
 az login --tenant $tenantId
 az account set --subscription $subscriptionId
 Write-Host "Authentication successful`n" -ForegroundColor Green
@@ -58,10 +59,12 @@ try {
         # Delete app registration
         az ad app delete --id $appId
         Write-Host "App Registration deleted: $appRegName`n" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "App Registration not found (already deleted or never created)`n" -ForegroundColor Gray
     }
-} catch {
+}
+catch {
     Write-Host "Warning: Could not delete App Registration: $_`n" -ForegroundColor Yellow
 }
 
@@ -75,10 +78,12 @@ try {
         Write-Host "Found Security Group: $entraIdGroupName (ID: $groupId)" -ForegroundColor Yellow
         az ad group delete --group $groupId
         Write-Host "Security Group deleted: $entraIdGroupName`n" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Security Group not found (already deleted or never created)`n" -ForegroundColor Gray
     }
-} catch {
+}
+catch {
     Write-Host "Warning: Could not delete Security Group: $_`n" -ForegroundColor Yellow
 }
 
@@ -102,10 +107,12 @@ try {
         az group delete --name $resourceGroupName --yes --no-wait
         Write-Host "Resource group deletion initiated: $resourceGroupName" -ForegroundColor Green
         Write-Host "Deletion is running in the background and may take 5-10 minutes to complete.`n" -ForegroundColor Yellow
-    } else {
+    }
+    else {
         Write-Host "Resource Group not found (already deleted or never created)`n" -ForegroundColor Gray
     }
-} catch {
+}
+catch {
     Write-Host "Warning: Could not delete Resource Group: $_`n" -ForegroundColor Yellow
 }
 

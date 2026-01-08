@@ -1,0 +1,565 @@
+========================================
+Starting Database Validation Tests
+========================================
+ 
+Test 1: Verifying Notes table...
+  ✓ Notes table contains correct count (17 notes)
+NoteId      NoteName   EnharmonicEquivalent SemitonesFromC
+----------- ---------- -------------------- --------------
+          1 C          NULL                              0
+          2 C#         Db                                1
+         13 Db         C#                                1
+          3 D          NULL                              2
+          4 D#         Eb                                3
+
+(5 rows affected)
+ 
+Test 2: Verifying Intervals table...
+  ✓ Intervals table contains correct count (13 intervals)
+IntervalId  IntervalName                                       Semitones   ShortName  RomanNumeral
+----------- -------------------------------------------------- ----------- ---------- ------------
+          1 Unison                                                       0 P1         I           
+          2 Minor Second                                                 1 min2       ♭II       
+          3 Major Second                                                 2 maj2       II          
+          4 Minor Third                                                  3 min3       ♭III      
+          5 Major Third                                                  4 maj3       III         
+
+(5 rows affected)
+ 
+Test 3: Verifying ScaleTypes table...
+  ✓ ScaleTypes table contains correct count (14 scale types)
+ScaleTypeId ScaleName                                          IntervalPattern                                    Description                                                                                                                                                                                             
+----------- -------------------------------------------------- -------------------------------------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+          1 Major                                              2,2,1,2,2,2,1                                      Ionian mode - Happy, bright sound                                                                                                                                                                       
+          2 Natural Minor                                      2,1,2,2,1,2,2                                      Aeolian mode - Sad, dark sound                                                                                                                                                                          
+          3 Harmonic Minor                                     2,1,2,2,1,3,1                                      Minor with raised 7th                                                                                                                                                                                   
+          4 Melodic Minor                                      2,1,2,2,2,2,1                                      Minor with raised 6th and 7th (ascending)                                                                                                                                                               
+          5 Dorian                                             2,1,2,2,2,1,2                                      Minor with raised 6th                                                                                                                                                                                   
+
+(5 rows affected)
+ 
+Test 4: Verifying ChordTypes table...
+  ✓ ChordTypes table contains correct count (28 chord types)
+ChordTypeId ChordName                                          ChordSymbol          IntervalPattern                                                                                      Description                                                                                                                                                                                             
+----------- -------------------------------------------------- -------------------- ---------------------------------------------------------------------------------------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+          1 Major                                              maj                  0,4,7                                                                                                Major triad - 1, 3, 5                                                                                                                                                                                   
+          2 Minor                                              min                  0,3,7                                                                                                Minor triad - 1, b3, 5                                                                                                                                                                                  
+          3 Diminished                                         dim                  0,3,6                                                                                                Diminished triad - 1, b3, b5                                                                                                                                                                            
+          4 Augmented                                          aug                  0,4,8                                                                                                Augmented triad - 1, 3, #5                                                                                                                                                                              
+          5 Major 7                                            maj7                 0,4,7,11                                                                                             Major seventh - 1, 3, 5, 7                                                                                                                                                                              
+
+(5 rows affected)
+ 
+Test 5: Verifying KeySignatures table...
+  ✓ KeySignatures table contains data (62 entries)
+KeySignatureId RootNote   ScaleTypeId PreferredAccidental ScaleLetterSequence                               
+-------------- ---------- ----------- ------------------- --------------------------------------------------
+             1 C                    1 natural             C,D,E,F,G,A,B                                     
+             2 G                    1 sharp               G,A,B,C,D,E,F                                     
+             3 D                    1 sharp               D,E,F,G,A,B,C                                     
+             4 A                    1 sharp               A,B,C,D,E,F,G                                     
+             5 E                    1 sharp               E,F,G,A,B,C,D                                     
+
+(5 rows affected)
+ 
+Test 6: Verifying ChordKeySignatures table...
+  ✓ ChordKeySignatures table contains data (17 entries)
+ChordKeySignatureId RootNote   PreferredAccidental Description                                                                                                                                                                                             
+------------------- ---------- ------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                  1 C          natural             C - Natural notes                                                                                                                                                                                       
+                  2 G          sharp               G - Sharp key                                                                                                                                                                                           
+                  3 D          sharp               D - Sharp key                                                                                                                                                                                           
+                  4 A          sharp               A - Sharp key                                                                                                                                                                                           
+                  5 E          sharp               E - Sharp key                                                                                                                                                                                           
+
+(5 rows affected)
+ 
+Test 7: Verifying ChordExtensions table...
+  ✓ ChordExtensions table contains data (18 extensions)
+ExtensionId ChordTypeId ExtensionName                                      ExtensionSymbol      Semitones   IsCommonInJazz
+----------- ----------- -------------------------------------------------- -------------------- ----------- --------------
+          1           5 Major 9                                            9                             14              1
+          2           5 Major 11                                           11                            17              0
+          3           5 Major 13                                           13                            21              1
+          4           6 Minor 9                                            9                             14              1
+          5           6 Minor 11                                           11                            17              1
+
+(5 rows affected)
+ 
+Test 8: Verifying DiatonicChordProgressions table...
+  ✓ DiatonicChordProgressions table contains data (301 chord progressions)
+  Sample: C Major diatonic chords:
+DegreeNumber DegreeRomanNumeral ChordSymbol          ChordQuality        
+------------ ------------------ -------------------- --------------------
+           1 I                  C                    Major               
+           1 I                  C                    Major               
+           2 ii                 Dm                   Minor               
+           2 ii                 Dm                   Minor               
+           3 iii                Em                   Minor               
+           3 iii                Em                   Minor               
+           4 IV                 F                    Major               
+           4 IV                 F                    Major               
+           5 V                  G                    Major               
+           5 V                  G                    Major               
+           6 vi                 Am                   Minor               
+           6 vi                 Am                   Minor               
+           7 vii°              B°                  Diminished          
+           7 vii°              B°                  Diminished          
+
+(14 rows affected)
+ 
+Test 9: Testing fn_GenerateScale function (C Major)...
+  ✓ C Major scale generates correct number of degrees (7)
+DegreeNumber         ScaleDegree Note       IntervalName                                      
+-------------------- ----------- ---------- --------------------------------------------------
+                   1 1 (Root)    C          Unison                                            
+                   2 2           D          Major Second                                      
+                   3 3           E          Major Third                                       
+                   4 4           F          Perfect Fourth                                    
+                   5 5           G          Perfect Fifth                                     
+                   6 6           A          Major Sixth                                       
+                   7 7           B          Major Seventh                                     
+
+(7 rows affected)
+ 
+Test 10: Testing fn_GenerateScale function (A Natural Minor)...
+  ✓ A Natural Minor scale generates correct number of degrees (7)
+DegreeNumber         ScaleDegree Note       IntervalName                                      
+-------------------- ----------- ---------- --------------------------------------------------
+                   1 1 (Root)    A          Unison                                            
+                   2 2           B          Major Second                                      
+                   3 3           C          Minor Third                                       
+                   4 4           D          Perfect Fourth                                    
+                   5 5           E          Perfect Fifth                                     
+                   6 6           F          Minor Sixth                                       
+                   7 7           G          Minor Seventh                                     
+
+(7 rows affected)
+ 
+Test 11: Testing fn_GenerateScale function (G Major)...
+  ✓ G Major scale generates correct number of degrees (7)
+DegreeNumber         ScaleDegree Note       IntervalName                                      
+-------------------- ----------- ---------- --------------------------------------------------
+                   1 1 (Root)    G          Unison                                            
+                   2 2           A          Major Second                                      
+                   3 3           B          Major Third                                       
+                   4 4           C          Perfect Fourth                                    
+                   5 5           D          Perfect Fifth                                     
+                   6 6           E          Major Sixth                                       
+                   7 7           F#         Major Seventh                                     
+
+(7 rows affected)
+ 
+Msg 207, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 14
+Invalid column name 'DegreeNumber'.
+Msg 207, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 14
+Invalid column name 'DegreeNumber'.
+Msg 207, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 14
+Invalid column name 'DegreeNumber'.
+Test 15: Testing vw_NoteIntervals view...
+  ✓ vw_NoteIntervals view returns data (204 intervals)
+FromNote   ToNote     IntervalName                                       Semitones  
+---------- ---------- -------------------------------------------------- -----------
+C          C          Unison                                                       0
+C          C#         Minor Second                                                 1
+C          D          Major Second                                                 2
+C          D#         Minor Third                                                  3
+C          E          Major Third                                                  4
+
+(5 rows affected)
+ 
+Msg 207, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 14
+Invalid column name 'DegreeNumber'.
+Msg 207, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 14
+Invalid column name 'DegreeNumber'.
+Test 14: Verifying all scale types can be generated...
+  ✓ All scale types can be generated successfully
+ 
+Test 15: Verifying all chord types can be generated...
+  ✓ All chord types can be generated successfully
+ 
+Test 14: Verifying DiatonicChordProgressions table...
+  ✓ DiatonicChordProgressions table contains chord progressions (301 entries)
+  Sample: C Major chord progression (I-ii-iii-IV-V-vi-vii°):
+DegreeNumber DegreeRomanNumeral ChordSymbol          ChordQuality         IntervalFromTonic
+------------ ------------------ -------------------- -------------------- -----------------
+           1 I                  C                    Major                                0
+           1 I                  C                    Major                                0
+           2 ii                 Dm                   Minor                                2
+           2 ii                 Dm                   Minor                                2
+           3 iii                Em                   Minor                                4
+           3 iii                Em                   Minor                                4
+           4 IV                 F                    Major                                5
+           4 IV                 F                    Major                                5
+           5 V                  G                    Major                                7
+           5 V                  G                    Major                                7
+           6 vi                 Am                   Minor                                9
+           6 vi                 Am                   Minor                                9
+           7 vii°              B°                  Diminished                          11
+           7 vii°              B°                  Diminished                          11
+
+(14 rows affected)
+ 
+Test 16: Testing vw_CircleOfFifthsKeys view...
+  ✓ vw_CircleOfFifthsKeys view contains keys (28 entries)
+  Sample: Major keys in Circle of Fifths order:
+RootNote   ScaleName                                          AccidentalCount AccidentalType RelativeKey CirclePosition
+---------- -------------------------------------------------- --------------- -------------- ----------- --------------
+C          Major                                                            0 Natural        A                        0
+G          Major                                                            1 Sharps         E                        1
+D          Major                                                            2 Sharps         B                        2
+A          Major                                                            3 Sharps         F#                       3
+E          Major                                                            4 Sharps         C#                       4
+B          Major                                                            5 Sharps         G#                       5
+F#         Major                                                            6 Sharps         D#                       6
+Gb         Major                                                            6 Flats          Eb                       6
+Db         Major                                                            5 Flats          Bb                       7
+C#         Major                                                            0 Sharps         NULL                     7
+Ab         Major                                                            4 Flats          F                        8
+Eb         Major                                                            3 Flats          C                        9
+
+(12 rows affected)
+ 
+Test 16: Verifying Circle of Fifths data integrity...
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 22
+  ✗ FAILED: 1 major keys missing chord progressions
+  ⚠ Warning: 2 keys missing relative key mapping
+ 
+Test 17: Detailed minor key chord progression diagnostic...
+  Minor keys with chord progressions: 14
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 18
+  ⚠ WARNING: Found 14 minor keys, expected 15
+ 
+  Minor keys in database:
+KeyNote   
+----------
+A         
+A#        
+B         
+Bb        
+C         
+C#        
+D         
+D#        
+E         
+Eb        
+F         
+F#        
+G         
+G#        
+
+(14 rows affected)
+ 
+Test 18: Checking specific minor keys that were failing in API...
+
+(13 rows affected)
+  ⚠ A minor: 14 chords (expected 7)
+  ✓ B minor: 7 chords
+  ✓ Bb minor: 7 chords
+  ✓ C minor: 7 chords
+  ✓ C# minor: 7 chords
+  ⚠ D minor: 14 chords (expected 7)
+  ✓ D# minor: 7 chords
+  ⚠ E minor: 14 chords (expected 7)
+  ✓ Eb minor: 7 chords
+  ✓ F minor: 7 chords
+  ✓ F# minor: 7 chords
+  ✓ G minor: 7 chords
+  ✓ G# minor: 7 chords
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 60
+  ✗ FAILED: Some keys are missing or incomplete
+ 
+Test 19: Verifying sample chord progressions...
+  F# minor chord progression:
+DegreeNumber DegreeRomanNumeral ChordSymbol         
+------------ ------------------ --------------------
+           1 i                  F#m                 
+           2 ii°               G#°                
+           3 III                A                   
+           4 iv                 Bm                  
+           5 v                  C#m                 
+           6 VI                 D                   
+           7 VII                E                   
+
+(7 rows affected)
+  ✓ F# minor progression complete (7 chords)
+ 
+  A minor chord progression:
+DegreeNumber DegreeRomanNumeral ChordSymbol         
+------------ ------------------ --------------------
+           1 i                  Am                  
+           1 i                  Am                  
+           2 ii°               B°                 
+           2 ii°               B°                 
+           3 III                C                   
+           3 III                C                   
+           4 iv                 Dm                  
+           4 iv                 Dm                  
+           5 v                  Em                  
+           5 v                  Em                  
+           6 VI                 F                   
+           6 VI                 F                   
+           7 VII                G                   
+           7 VII                G                   
+
+(14 rows affected)
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 32
+  ✗ FAILED: A minor progression has 14 chords, expected 7
+ 
+Test 20: Checking table metadata for deployment verification...
+TableName                                                                                                                        CreateDate              ModifyDate              MinutesSinceCreation MinutesSinceModification
+-------------------------------------------------------------------------------------------------------------------------------- ----------------------- ----------------------- -------------------- ------------------------
+DiatonicChordProgressions                                                                                                        2026-01-08 08:21:33.160 2026-01-08 08:21:33.590                    1                        1
+
+(1 rows affected)
+  Note: If create_date is recent, table was dropped and recreated
+  Note: If modify_date is recent, data was recently inserted/updated
+ 
+Test 21: Missing keys report...
+
+(13 rows affected)
+  Expected 13 minor keys (enharmonic spellings excluded):
+ExpectedKey Status      ChordCount 
+----------- ----------- -----------
+A           ✓ Found             7
+B           ✓ Found             7
+Bb          ✓ Found             7
+C           ✓ Found             7
+C#          ✓ Found             7
+D           ✓ Found             7
+D#          ✓ Found             7
+E           ✓ Found             7
+Eb          ✓ Found             7
+F           ✓ Found             7
+F#          ✓ Found             7
+G           ✓ Found             7
+G#          ✓ Found             7
+
+(13 rows affected)
+  ✓ All expected keys found
+ 
+Test 22: Checking for duplicate diatonic chords...
+KeyNote    ScaleTypeId DegreeNumber ChordSymbol          DuplicateCount
+---------- ----------- ------------ -------------------- --------------
+A                    1            1 A                                 2
+A                    2            1 Am                                2
+A                    1            2 Bm                                2
+A                    2            2 B°                               2
+A                    1            3 C#m                               2
+A                    2            3 C                                 2
+A                    1            4 D                                 2
+A                    2            4 Dm                                2
+A                    1            5 E                                 2
+A                    2            5 Em                                2
+A                    1            6 F#m                               2
+A                    2            6 F                                 2
+A                    1            7 G#°                              2
+A                    2            7 G                                 2
+Ab                   1            1 Ab                                2
+Ab                   1            2 Bbm                               2
+Ab                   1            3 Cm                                2
+Ab                   1            4 Db                                2
+Ab                   1            5 Eb                                2
+Ab                   1            6 Fm                                2
+Ab                   1            7 G°                               2
+B                    1            1 B                                 2
+B                    1            2 C#m                               2
+B                    1            3 D#m                               2
+B                    1            4 E                                 2
+B                    1            5 F#                                2
+B                    1            6 G#m                               2
+B                    1            7 A#°                              2
+Bb                   1            1 Bb                                2
+Bb                   1            2 Cm                                2
+Bb                   1            3 Dm                                2
+Bb                   1            4 Eb                                2
+Bb                   1            5 F                                 2
+Bb                   1            6 Gm                                2
+Bb                   1            7 A°                               2
+C                    1            1 C                                 2
+C                    1            2 Dm                                2
+C                    1            3 Em                                2
+C                    1            4 F                                 2
+C                    1            5 G                                 2
+C                    1            6 Am                                2
+C                    1            7 B°                               2
+D                    1            1 D                                 2
+D                    2            1 Dm                                2
+D                    1            2 Em                                2
+D                    2            2 E°                               2
+D                    1            3 F#m                               2
+D                    2            3 F                                 2
+D                    1            4 G                                 2
+D                    2            4 Gm                                2
+D                    1            5 A                                 2
+D                    2            5 Am                                2
+D                    1            6 Bm                                2
+D                    2            6 Bb                                2
+D                    1            7 C#°                              2
+D                    2            7 C                                 2
+Db                   1            1 Db                                2
+Db                   1            2 Ebm                               2
+Db                   1            3 Fm                                2
+Db                   1            4 Gb                                2
+Db                   1            5 Ab                                2
+Db                   1            6 Bbm                               2
+Db                   1            7 C°                               2
+E                    1            1 E                                 2
+E                    2            1 Em                                2
+E                    1            2 F#m                               2
+E                    2            2 F#°                              2
+E                    1            3 G#m                               2
+E                    2            3 G                                 2
+E                    1            4 A                                 2
+E                    2            4 Am                                2
+E                    1            5 B                                 2
+E                    2            5 Bm                                2
+E                    1            6 C#m                               2
+E                    2            6 C                                 2
+E                    1            7 D#°                              2
+E                    2            7 D                                 2
+Eb                   1            1 Eb                                2
+Eb                   1            2 Fm                                2
+Eb                   1            3 Gm                                2
+Eb                   1            4 Ab                                2
+Eb                   1            5 Bb                                2
+Eb                   1            6 Cm                                2
+Eb                   1            7 D°                               2
+F                    1            1 F                                 2
+F                    1            2 Gm                                2
+F                    1            3 Am                                2
+F                    1            4 Bb                                2
+F                    1            5 C                                 2
+F                    1            6 Dm                                2
+F                    1            7 E°                               2
+F#                   1            1 F#                                2
+F#                   1            2 G#m                               2
+F#                   1            3 A#m                               2
+F#                   1            4 B                                 2
+F#                   1            5 C#                                2
+F#                   1            6 D#m                               2
+F#                   1            7 E#°                              2
+G                    1            1 G                                 2
+G                    1            2 Am                                2
+G                    1            3 Bm                                2
+G                    1            4 C                                 2
+G                    1            5 D                                 2
+G                    1            6 Em                                2
+G                    1            7 F#°                              2
+Gb                   1            1 Gb                                2
+Gb                   1            2 Abm                               2
+Gb                   1            3 Bbm                               2
+Gb                   1            4 Cb                                2
+Gb                   1            5 Db                                2
+Gb                   1            6 Ebm                               2
+Gb                   1            7 F°                               2
+
+(112 rows affected)
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 18
+  ✗ FAILED: Duplicate chords found - see results above
+ 
+Test 23: Verifying C# Minor sharp symbols...
+DegreeNumber DegreeRomanNumeral ChordRoot  ChordSymbol          SymbolLength SecondCharASCII HasSharp      
+------------ ------------------ ---------- -------------------- ------------ --------------- --------------
+           1 i                  C#         C#m                             3              35 ✓ Contains #
+           2 ii°               D#         D#°                            4              35 ✓ Contains #
+           3 III                E          E                               1            NULL ✗ Missing # 
+           4 iv                 F#         F#m                             3              35 ✓ Contains #
+           5 v                  G#         G#m                             3              35 ✓ Contains #
+           6 VI                 A          A                               1            NULL ✗ Missing # 
+           7 VII                B          B                               1            NULL ✗ Missing # 
+
+(7 rows affected)
+  ✓ All sharp symbols present in C# Minor
+ 
+Test 24: Verifying sharp symbols in all sharp minor keys...
+KeyNote    DegreeNumber ChordSymbol          SharpCheck                      
+---------- ------------ -------------------- --------------------------------
+A#                    1 A#m                  ✓                             
+A#                    2 B#°                 ✓                             
+A#                    3 C#                   ✓                             
+A#                    4 D#m                  ✓                             
+A#                    5 E#m                  ✓                             
+A#                    6 F#                   ✓                             
+A#                    7 G#                   ✓                             
+B                     2 C#°                 ✓                             
+B                     5 F#m                  ✓                             
+C#                    1 C#m                  ✓                             
+C#                    2 D#°                 ✓                             
+C#                    4 F#m                  ✓                             
+C#                    5 G#m                  ✓                             
+D#                    1 D#m                  ✓                             
+D#                    2 E#°                 ✓                             
+D#                    3 F#                   ✓                             
+D#                    4 G#m                  ✓                             
+D#                    5 A#m                  ✓                             
+D#                    7 C#                   ✓                             
+F#                    1 F#m                  ✓                             
+F#                    2 G#°                 ✓                             
+F#                    5 C#m                  ✓                             
+G#                    1 G#m                  ✓                             
+G#                    2 A#°                 ✓                             
+G#                    4 C#m                  ✓                             
+G#                    5 D#m                  ✓                             
+G#                    7 F#                   ✓                             
+
+(27 rows affected)
+  ✓ All sharp symbols correct in sharp minor keys
+ 
+Test 25: Verifying chord count per key...
+KeyNote    ScaleTypeId ScaleType ChordCount  Status        
+---------- ----------- --------- ----------- --------------
+A                    1 Major              14 ✗ Expected 7
+Ab                   1 Major              14 ✗ Expected 7
+B                    1 Major              14 ✗ Expected 7
+Bb                   1 Major              14 ✗ Expected 7
+C                    1 Major              14 ✗ Expected 7
+D                    1 Major              14 ✗ Expected 7
+Db                   1 Major              14 ✗ Expected 7
+E                    1 Major              14 ✗ Expected 7
+Eb                   1 Major              14 ✗ Expected 7
+F                    1 Major              14 ✗ Expected 7
+F#                   1 Major              14 ✗ Expected 7
+G                    1 Major              14 ✗ Expected 7
+Gb                   1 Major              14 ✗ Expected 7
+A                    2 Minor              14 ✗ Expected 7
+A#                   2 Minor               7 ✓           
+B                    2 Minor               7 ✓           
+Bb                   2 Minor               7 ✓           
+C                    2 Minor               7 ✓           
+C#                   2 Minor               7 ✓           
+D                    2 Minor              14 ✗ Expected 7
+D#                   2 Minor               7 ✓           
+E                    2 Minor              14 ✗ Expected 7
+Eb                   2 Minor               7 ✓           
+F                    2 Minor               7 ✓           
+F#                   2 Minor               7 ✓           
+G                    2 Minor               7 ✓           
+G#                   2 Minor               7 ✓           
+
+(27 rows affected)
+Msg 50000, Level 16, State 1, Server sql-grooveapp-dev-uhxg, Line 29
+  ✗ FAILED: 16 keys have incorrect chord count
+ 
+========================================
+Database Validation Complete!
+========================================
+Test Summary:
+  Tests 1-6:   Core tables (Notes, Intervals, ScaleTypes, ChordTypes)
+  Tests 7-11:  Functions (fn_GenerateScale, fn_GenerateArpeggio)
+  Tests 12-16: Circle of Fifths (views, chord progressions, data integrity)
+  Tests 17-21: Detailed diagnostics (minor keys, missing data, metadata)
+  Tests 22-25: Circle of Fifths validation (duplicates, sharp symbols, counts)
+ 
+If all tests pass:
+  ✓ Database is ready for use
+ 
+If Tests 17-21 show missing minor keys:
+  ✗ Re-run deployment: sqlcmd -S <server> -d <database> -G -i setup-music-tables.sql
+  ✗ Verify correct database: Check server and database names match environment
+ 
+If Tests 22-25 show issues:
+  ✗ Test 22 fails: Duplicate data - redeploy with GO statements fixed
+  ✗ Test 23-24 fails: Sharp symbols missing - check Unicode encoding in database
+  ✗ Test 25 fails: Incorrect chord counts - verify INSERT statements complete
+ 

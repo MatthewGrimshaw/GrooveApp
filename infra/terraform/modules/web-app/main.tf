@@ -17,6 +17,15 @@ resource "azurerm_linux_web_app" "main" {
     }
 
     health_check_path = var.health_check_path
+
+    # CORS configuration
+    dynamic "cors" {
+      for_each = length(var.cors_allowed_origins) > 0 ? [1] : []
+      content {
+        allowed_origins     = var.cors_allowed_origins
+        support_credentials = var.cors_support_credentials
+      }
+    }
   }
 
   app_settings = merge(
@@ -30,38 +39,81 @@ resource "azurerm_linux_web_app" "main" {
     type = "SystemAssigned"
   }
 
+  # Easy Auth configuration on main app
+  dynamic "auth_settings_v2" {
+    for_each = var.enable_authentication ? [1] : []
+    content {
+      auth_enabled           = true
+      require_authentication = true
+      unauthenticated_action = var.unauthenticated_action
+
+      login {
+        token_store_enabled = true
+      }
+
+      active_directory_v2 {
+        client_id            = var.client_id
+        tenant_auth_endpoint = "https://login.microsoftonline.com/${var.tenant_id}/v2.0"
+
+        allowed_audiences = [
+          "api://${var.client_id}"
+        ]
+      }
+    }
+  }
+
   https_only = true
 
   tags = var.tags
 }
 
-# Easy Auth configuration
-resource "azurerm_linux_web_app_slot" "auth_config" {
-  count = var.enable_authentication ? 1 : 0
+# VNet Integration
+resource "azurerm_app_service_virtual_network_swift_connection" "main" {
+  count = var.enable_vnet_integration ? 1 : 0
 
-  name           = "auth"
   app_service_id = azurerm_linux_web_app.main.id
+  subnet_id      = var.vnet_integration_subnet_id
+}
 
-  site_config {
-    always_on = false
+# Diagnostic Settings
+resource "azurerm_monitor_diagnostic_setting" "web_app" {
+  name                       = "${var.app_name}-diagnostics"
+  target_resource_id         = azurerm_linux_web_app.main.id
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  # HTTP Logs
+  enabled_log {
+    category = "AppServiceHTTPLogs"
   }
 
-  auth_settings_v2 {
-    auth_enabled           = true
-    require_authentication = true
-    unauthenticated_action = "RedirectToLoginPage"
+  # Console Logs
+  enabled_log {
+    category = "AppServiceConsoleLogs"
+  }
 
-    login {
-      token_store_enabled = true
-    }
+  # Application Logs
+  enabled_log {
+    category = "AppServiceAppLogs"
+  }
 
-    active_directory_v2 {
-      client_id            = var.client_id
-      tenant_auth_endpoint = "https://login.microsoftonline.com/${var.tenant_id}/v2.0"
+  # Platform Logs
+  enabled_log {
+    category = "AppServicePlatformLogs"
+  }
 
-      allowed_audiences = [
-        "api://${var.client_id}"
-      ]
-    }
+  # Audit Logs
+  enabled_log {
+    category = "AppServiceAuditLogs"
+  }
+
+  # IP Security Audit Logs
+  enabled_log {
+    category = "AppServiceIPSecAuditLogs"
+  }
+
+  # Metrics
+  metric {
+    category = "AllMetrics"
+    enabled  = true
   }
 }

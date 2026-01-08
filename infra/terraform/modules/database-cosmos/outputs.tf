@@ -28,9 +28,3 @@ output "primary_key" {
   value       = azurerm_cosmosdb_account.main.primary_key
   sensitive   = true
 }
-
-output "connection_string" {
-  description = "Primary connection string for Cosmos DB account"
-  value       = azurerm_cosmosdb_account.main.connection_strings[0]
-  sensitive   = true
-}

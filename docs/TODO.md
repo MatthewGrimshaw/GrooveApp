@@ -17,12 +17,16 @@
   - Security reviews
 - Debug on GUI
 
+
 ## Infra Dev
 
-- Deploy two app services
 - App Gateway with WAF
 - Terraform
-- GIthub repos
+  - easy auth not enabled
+  - why three staging slots? what is auth?
+  - database authentication not working: is the webapps managed identity added as a login to the database? 
+- Github repos - security
+  - test actions for docker and dependabot
 - Front Door with WAF
 - Traffic Manager
 - Setup Git
@@ -34,7 +38,10 @@
   - Branching strategy
 - Private Link
   - App Service & DB
-  - App Gateway & App Services
+  - App Gateway & App Services- 
+- Deploy Database script - run SQL queries as part of deployment
+- Logging
+  - Alerts
 
 ## Database Dev
 

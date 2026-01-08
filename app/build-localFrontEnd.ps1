@@ -27,13 +27,15 @@
     Default: high (blocks critical and high)
 .PARAMETER SkipScan
     Skip vulnerability scanning during build (not recommended)
+.PARAMETER LogLevel
+    Log level for the application (OFF, ERROR, WARNING, INFO, DEBUG)
+    Default: DEBUG for local, INFO for production
 .EXAMPLE
-    .\test-local-app.ps1 -Rebuild
-    .\test-local-app.ps1 -TestApi
-    .\test-local-app.ps1 -TestApi -Verbose
-    .\test-local-app.ps1 -TestApi -ApiUrl "https://webapp-grooveapp-api.azurewebsites.net"
-    .\test-local-app.ps1 -Logs
-    .\test-local-app.ps1 -Stop
+    .\build-localFrontEnd.ps1 -Rebuild
+    .\build-localFrontEnd.ps1 -Rebuild -LogLevel INFO
+    .\build-localFrontEnd.ps1 -Production
+    .\build-localFrontEnd.ps1 -Logs
+    .\build-localFrontEnd.ps1 -Stop
 #>
 
 param(
@@ -47,7 +49,9 @@ param(
   [switch]$StopOnError,
   [ValidateSet("critical", "high", "medium", "low")]
   [string]$MaxSeverity = "high",
-  [switch]$SkipScan
+  [switch]$SkipScan,
+  [ValidateSet("OFF", "ERROR", "WARNING", "INFO", "DEBUG")]
+  [string]$LogLevel = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,6 +92,16 @@ if ($Rebuild) {
     Write-Host "Building for DEVELOPMENT (connects to localhost:8000)" -ForegroundColor Yellow
   }
 
+  # Local testing uses console logging only (no Application Insights)
+  Write-Host "Application Insights: Disabled (console logging only for local testing)" -ForegroundColor Cyan
+
+  # Set log level (default: DEBUG for dev, INFO for prod)
+  $effectiveLogLevel = $LogLevel
+  if (-not $effectiveLogLevel) {
+    $effectiveLogLevel = if ($Production) { "INFO" } else { "DEBUG" }
+  }
+  Write-Host "Log Level: $effectiveLogLevel" -ForegroundColor Cyan
+
   # Skip npm audit during build if requested
   if ($SkipScan) {
     Write-Host "⚠️  Skipping npm audit during build" -ForegroundColor Yellow
@@ -110,29 +124,61 @@ if ($Rebuild) {
     Write-Host "Security Scan (Docker Scout)" -ForegroundColor Cyan
     Write-Host "================================================`n" -ForegroundColor Cyan
 
-    # Check if Docker Scout is available
-    $scoutAvailable = docker scout version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-      Write-Host "Scanning for CVEs (max severity: $MaxSeverity)..." -ForegroundColor Cyan
+    # Get scan output and parse vulnerability counts (consistent with API script)
+    $scanOutput = docker scout cves $imageName 2>&1 | Out-String
 
-      # Run Docker Scout scan
-      docker scout cves $imageName --only-severity critical, high --exit-code
+    # Parse vulnerability counts
+    $criticalCount = 0
+    $highCount = 0
+    $mediumCount = 0
+    $lowCount = 0
 
-      if ($LASTEXITCODE -ne 0) {
-        Write-Host "`n❌ Security vulnerabilities found!" -ForegroundColor Red
-        Write-Host "   High or critical CVEs detected in the image." -ForegroundColor Yellow
-        Write-Host "   Review the scan results above." -ForegroundColor Yellow
-        Write-Host "`n   Options:" -ForegroundColor Yellow
-        Write-Host "   - Fix vulnerabilities: Update dependencies in package.json" -ForegroundColor Yellow
-        Write-Host "   - Skip scan: Re-run with -SkipScan flag" -ForegroundColor Yellow
-        Write-Host "   - Allow medium: Re-run with -MaxSeverity medium" -ForegroundColor Yellow
-        exit 1
+    if ($scanOutput -match "(\d+)C\s+(\d+)H\s+(\d+)M\s+(\d+)L") {
+      $criticalCount = [int]$matches[1]
+      $highCount = [int]$matches[2]
+      $mediumCount = [int]$matches[3]
+      $lowCount = [int]$matches[4]
+    }
+
+    Write-Host "Vulnerability Summary:" -ForegroundColor Cyan
+    Write-Host "  Critical: $criticalCount" -ForegroundColor $(if ($criticalCount -gt 0) { "Red" } else { "Green" })
+    Write-Host "  High:     $highCount" -ForegroundColor $(if ($highCount -gt 0) { "Red" } else { "Green" })
+    Write-Host "  Medium:   $mediumCount" -ForegroundColor $(if ($mediumCount -gt 0) { "Yellow" } else { "Green" })
+    Write-Host "  Low:      $lowCount" -ForegroundColor Green
+
+    # Check threshold based on MaxSeverity parameter
+    $shouldFail = $false
+    $failReason = ""
+
+    switch ($MaxSeverity) {
+      "critical" {
+        if ($criticalCount -gt 0) {
+          $shouldFail = $true
+          $failReason = "Found $criticalCount CRITICAL vulnerabilities"
+        }
       }
-      Write-Host "✅ No high/critical vulnerabilities found" -ForegroundColor Green
+      "high" {
+        if ($criticalCount -gt 0 -or $highCount -gt 0) {
+          $shouldFail = $true
+          $failReason = "Found $criticalCount CRITICAL and $highCount HIGH vulnerabilities"
+        }
+      }
+      "medium" {
+        if ($criticalCount -gt 0 -or $highCount -gt 0 -or $mediumCount -gt 0) {
+          $shouldFail = $true
+          $failReason = "Found vulnerabilities exceeding medium threshold"
+        }
+      }
+    }
+
+    if ($shouldFail) {
+      Write-Host "`n❌ SECURITY SCAN FAILED: $failReason" -ForegroundColor Red
+      Write-Host "To fix: docker scout recommendations $imageName" -ForegroundColor Yellow
+      Write-Host "To override: .\build-localFrontEnd.ps1 -Rebuild -MaxSeverity medium" -ForegroundColor Yellow
+      exit 1
     }
     else {
-      Write-Host "⚠️  Docker Scout not available - skipping CVE scan" -ForegroundColor Yellow
-      Write-Host "   Install: https://docs.docker.com/scout/install/" -ForegroundColor Yellow
+      Write-Host "✅ Security scan passed (max severity: $MaxSeverity)" -ForegroundColor Green
     }
   }
   else {
@@ -159,9 +205,23 @@ docker rm $containerName 2>$null | Out-Null
 
 # Run container
 Write-Host "`n🚀 Starting container..." -ForegroundColor Cyan
+
+# Build environment variable array for log level and API URL
+$envVars = @()
+$effectiveLogLevel = if ($LogLevel) { $LogLevel } elseif ($Production) { "INFO" } else { "DEBUG" }
+$envVars += "-e", "LOG_LEVEL=$effectiveLogLevel"
+
+# Set API_URL based on environment
+# For local dev: use localhost since the browser (not the container) makes API calls
+# Angular runs in the browser, so it accesses the API from the host machine perspective
+if (-not $Production) {
+  $envVars += "-e", "API_URL=http://localhost:8000"
+}
+
 docker run -d `
   --name $containerName `
   -p ${port}:8080 `
+  $envVars `
   $imageName
 
 if ($LASTEXITCODE -ne 0) {
@@ -187,10 +247,12 @@ catch {
 }
 
 Write-Host "`n📱 Frontend URL: http://localhost:${port}" -ForegroundColor Green
-Write-Host "📖 View logs: .\test-local-app.ps1 -Logs" -ForegroundColor Cyan
-Write-Host "🛑 Stop: .\test-local-app.ps1 -Stop" -ForegroundColor Cyan
+Write-Host "📖 View logs: .\build-localFrontEnd.ps1 -Logs" -ForegroundColor Cyan
+Write-Host "🛑 Stop: .\build-localFrontEnd.ps1 -Stop" -ForegroundColor Cyan
+Write-Host "`n📊 Logging: Console only (Application Insights only enabled in Azure deployments)" -ForegroundColor Cyan
+Write-Host "   Open browser console (F12) to see logs" -ForegroundColor Gray
 
 if (-not $Production) {
   Write-Host "`n⚠️  Make sure the API is running on http://localhost:8000" -ForegroundColor Yellow
-  Write-Host "   Run: cd ..\api; .\test-local-api.ps1" -ForegroundColor Yellow
+  Write-Host "   Run: cd ..\api; .\build-localApi.ps1" -ForegroundColor Yellow
 }

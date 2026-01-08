@@ -1,0 +1,50 @@
+name: Deploy SQL Schema
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'infra/setup-music-tables.sql'
+
+jobs:
+  deploy-schema:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Get SQL Server Details
+        id: sql
+        run: |
+          SERVER_FQDN=$(az sql server show \
+            --name <server-name> \
+            --resource-group <rg-name> \
+            --query fullyQualifiedDomainName -o tsv)
+          echo "server=$SERVER_FQDN" >> $GITHUB_OUTPUT
+      
+      - name: Install sqlcmd
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | \
+            sudo tee /etc/apt/sources.list.d/msprod.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+      
+      - name: Execute SQL Script
+        env:
+          SQLCMDPASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+        run: |
+          /opt/mssql-tools18/bin/sqlcmd \
+            -S ${{ steps.sql.outputs.server }} \
+            -d grooveapp-db \
+            -U sqladmin \
+            -i infra/setup-music-tables.sql \
+            -C  # Trust server certificate for Azure SQL

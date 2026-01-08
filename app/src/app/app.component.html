@@ -1,18 +1,124 @@
 <div class="container">
   <header>
     <h1>🎵 {{ title }}</h1>
-    <div class="health-container">
-      <div class="health-status"
-           [class.healthy]="healthStatus?.includes('healthy')"
-           [class.unhealthy]="healthStatus?.includes('Unavailable')"
-           [class.warning]="healthStatus?.includes('failure')">
-        {{ healthStatus || 'Checking...' }}
-      </div>
-      <div class="health-details" *ngIf="healthDetails">
-        {{ healthDetails }}
+    <div class="header-right">
+      <button class="debug-toggle" (click)="toggleDebugMode()" [class.active]="debugMode">
+        {{ debugMode ? '🐛 Debug ON' : '🐛 Debug' }}
+      </button>
+      <div class="health-container">
+        <div class="health-status"
+             [class.healthy]="healthStatus?.includes('healthy')"
+             [class.unhealthy]="healthStatus?.includes('Unavailable')"
+             [class.warning]="healthStatus?.includes('failure')">
+          {{ healthStatus || 'Checking...' }}
+        </div>
+        <div class="health-details" *ngIf="healthDetails">
+          {{ healthDetails }}
+        </div>
       </div>
     </div>
   </header>
+
+  <!-- Debug Panel -->
+  <div class="debug-panel" *ngIf="debugMode">
+    <div class="debug-header">
+      <h3>🐛 Debug Information</h3>
+      <div class="debug-actions">
+        <button (click)="testConnection()">Test Connection</button>
+        <button (click)="clearDebugLog()">Clear Event Log</button>
+        <button (click)="clearHttpLogs()">Clear HTTP Log</button>
+        <button (click)="autoRefreshLogs = !autoRefreshLogs" [class.active]="autoRefreshLogs">
+          {{ autoRefreshLogs ? '⏸ Pause' : '▶ Resume' }}
+        </button>
+      </div>
+    </div>
+    <div class="debug-info">
+      <div><strong>API URL:</strong> {{ apiUrl }}</div>
+      <div><strong>Health Status:</strong> {{ healthStatus }}</div>
+      <div><strong>Response Time:</strong> {{ healthResponseTime }}ms</div>
+      <div><strong>HTTP Requests:</strong> {{ httpLogs.length }}</div>
+    </div>
+
+    <!-- HTTP Traffic Log -->
+    <div class="http-traffic-log">
+      <div class="debug-log-title">🌐 HTTP Traffic ({{ httpLogs.length }} requests)</div>
+      <div class="http-log-container">
+        <div class="http-log-list">
+          <div
+            class="http-log-entry"
+            *ngFor="let log of httpLogs; let i = index"
+            [class.selected]="selectedHttpLog === log"
+            [class.error]="getLogStatusClass(log) === 'error'"
+            [class.success]="getLogStatusClass(log) === 'success'"
+            (click)="selectHttpLog(log)">
+            <div class="log-header">
+              <span class="log-time">{{ formatTimestamp(log.timestamp) }}</span>
+              <span class="log-method" [class]="log.method.toLowerCase()">{{ log.method }}</span>
+              <span class="log-status" *ngIf="log.status">{{ log.status }}</span>
+              <span class="log-duration" *ngIf="log.duration">{{ log.duration }}ms</span>
+            </div>
+            <div class="log-url">{{ log.url }}</div>
+            <div class="log-type" [class]="log.type">{{ log.type.toUpperCase() }}</div>
+          </div>
+        </div>
+
+        <!-- Selected Log Details -->
+        <div class="http-log-details" *ngIf="selectedHttpLog">
+          <div class="details-header">
+            <h4>Request Details</h4>
+            <button (click)="selectedHttpLog = null" class="close-btn">✕</button>
+          </div>
+
+          <div class="detail-section">
+            <strong>URL:</strong>
+            <div class="detail-value">{{ selectedHttpLog.url }}</div>
+          </div>
+
+          <div class="detail-section">
+            <strong>Method:</strong> {{ selectedHttpLog.method }}
+            <strong>Status:</strong> {{ selectedHttpLog.status || 'N/A' }}
+            <strong>Duration:</strong> {{ selectedHttpLog.duration || 'N/A' }}ms
+          </div>
+
+          <div class="detail-section">
+            <strong>Operation ID:</strong>
+            <div class="detail-value mono">{{ selectedHttpLog.operationId }}</div>
+          </div>
+
+          <div class="detail-section" *ngIf="selectedHttpLog.requestHeaders">
+            <strong>Request Headers:</strong>
+            <pre class="detail-value">{{ formatJson(selectedHttpLog.requestHeaders) }}</pre>
+          </div>
+
+          <div class="detail-section" *ngIf="selectedHttpLog.requestBody">
+            <strong>Request Body:</strong>
+            <pre class="detail-value">{{ formatJson(selectedHttpLog.requestBody) }}</pre>
+          </div>
+
+          <div class="detail-section" *ngIf="selectedHttpLog.responseHeaders">
+            <strong>Response Headers:</strong>
+            <pre class="detail-value">{{ formatJson(selectedHttpLog.responseHeaders) }}</pre>
+          </div>
+
+          <div class="detail-section" *ngIf="selectedHttpLog.responseBody">
+            <strong>Response Body:</strong>
+            <pre class="detail-value response-body">{{ formatJson(selectedHttpLog.responseBody) }}</pre>
+          </div>
+
+          <div class="detail-section error-section" *ngIf="selectedHttpLog.errorMessage">
+            <strong>Error Message:</strong>
+            <div class="detail-value error">{{ selectedHttpLog.errorMessage }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="debug-log">
+      <div class="debug-log-title">📋 Event Log:</div>
+      <div class="debug-log-entry" *ngFor="let entry of debugInfo">{{ entry }}</div>
+    </div>
+  </div>
 
   <div class="error-message" *ngIf="error">
     ⚠️ {{ error }}
@@ -37,6 +143,12 @@
       [class.active]="activeTab === 'intervals'"
       (click)="setActiveTab('intervals')">
       Intervals
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab === 'circle-of-fifths'"
+      (click)="setActiveTab('circle-of-fifths')">
+      Circle of Fifths
     </button>
   </div>
 
@@ -173,6 +285,11 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Circle of Fifths Tab -->
+  <div class="tab-content" *ngIf="activeTab === 'circle-of-fifths'">
+    <app-circle-of-fifths></app-circle-of-fifths>
   </div>
 
   <div class="loading" *ngIf="loading">Loading...</div>

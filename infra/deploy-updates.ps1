@@ -13,10 +13,10 @@ param(
 # Variables
 $tenantId = "44e2b0ad-2191-469a-aeaa-76f87ca1f198"
 $subscriptionId = "7a06440f-dea7-4668-8d49-5b7c4ebcf187"
-$resourceGroupName = "rg-grooveapp"
-$acrName = "acrgrooveapp"
-$webAppName = "webapp-grooveapp-api"
-$frontendWebAppName = "webapp-grooveapp-frontend"
+$resourceGroupName = "rg-grooveapp-dev"
+$acrName = "acrgrooveappdevuhxg"
+$webAppName = "app-grooveapp-dev-api"
+$frontendWebAppName = "app-grooveapp-dev-frontend"
 $stagingSlotName = "staging"
 
 Write-Host "======================================"
@@ -27,11 +27,14 @@ Write-Host ""
 # Get script directory and workspace root
 $scriptPath = if ($PSScriptRoot) { 
     $PSScriptRoot 
-} elseif ($psISE) { 
+}
+elseif ($psISE) { 
     Split-Path -Parent $psISE.CurrentFile.FullPath 
-} elseif ($null -ne $psEditor) {
+}
+elseif ($null -ne $psEditor) {
     Split-Path -Parent $psEditor.GetEditorContext().CurrentFile.Path
-} else {
+}
+else {
     $PWD.Path
 }
 
@@ -48,6 +51,7 @@ $deployFrontend = -not $ApiOnly
 
 # Authentication
 Write-Host "Step 1: Authenticating with Azure..." -ForegroundColor Cyan
+az config set core.login_experience_v2=off
 az login --tenant $tenantId --output none 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Already authenticated or using cached credentials" -ForegroundColor Yellow
@@ -81,7 +85,8 @@ if ($deployApi) {
             Write-Host "Building and scanning Docker image locally..." -ForegroundColor Yellow
             Push-Location $apiPath
             try {
-                & .\test-local-api.ps1 -Rebuild -MaxSeverity high
+                $buildScript = Join-Path $apiPath "build-localApi.ps1"
+                & $buildScript -Rebuild -MaxSeverity high
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host "Security scan failed. Fix vulnerabilities before deploying." -ForegroundColor Red
                     Write-Host "Review vulnerabilities with: docker scout cves grooveapp-api" -ForegroundColor Yellow
@@ -89,30 +94,40 @@ if ($deployApi) {
                     exit 1
                 }
                 Write-Host "✅ Security scan passed - No HIGH or CRITICAL CVEs detected`n" -ForegroundColor Green
-            } catch {
+            }
+            catch {
                 Write-Host "Error during build/scan: $_" -ForegroundColor Red
                 Pop-Location
                 exit 1
-            } finally {
+            }
+            finally {
                 Pop-Location
             }
         }
 
-        # Generate unique tag
+        # Generate unique tag for grooveapp-api repository
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $apiImageTag = "grooveapp-api:$timestamp"
+        $apiLatestTag = "grooveapp-api:latest"
 
-        # Push to Azure Container Registry
-        Write-Host "Pushing image to ACR with tag: $apiImageTag" -ForegroundColor Yellow
+        # Push to Azure Container Registry with both unique and latest tags
+        Write-Host "Pushing image to ACR repository 'grooveapp-api' with tags: $timestamp and latest" -ForegroundColor Yellow
         az acr build `
             --registry $acrName `
             --image $apiImageTag `
-            --image grooveapp-api:latest `
+            --image $apiLatestTag `
             --file $apiDockerfilePath `
             $apiPath
 
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ API Docker image build failed" -ForegroundColor Red
+            Write-Host "Check the build output above for details" -ForegroundColor Yellow
+            exit 1
+        }
+
         Write-Host "API Docker image built and pushed successfully`n" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Step 3: Skipping API image build (using existing latest image)`n" -ForegroundColor Yellow
     }
 
@@ -133,7 +148,8 @@ if ($deployApi) {
             --configuration-source $webAppName `
             --output none
         Write-Host "Staging slot created" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Staging slot already exists" -ForegroundColor Green
     }
 
@@ -171,12 +187,14 @@ if ($deployApi) {
                 $healthy = $true
                 Write-Host "✅ Staging slot is healthy" -ForegroundColor Green
             }
-        } catch {
+        }
+        catch {
             $retryCount++
             if ($retryCount -lt $maxRetries) {
                 Write-Host "Health check failed, retrying... ($retryCount/$maxRetries)" -ForegroundColor Yellow
                 Start-Sleep -Seconds 10
-            } else {
+            }
+            else {
                 Write-Host "⚠️ Warning: Health check failed after $maxRetries attempts" -ForegroundColor Red
                 Write-Host "You may want to check the logs before swapping:" -ForegroundColor Yellow
                 Write-Host "  az webapp log tail --name $webAppName --resource-group $resourceGroupName --slot $stagingSlotName" -ForegroundColor White
@@ -204,7 +222,8 @@ if ($deployApi) {
 
         Write-Host "✅ API swap complete!" -ForegroundColor Green
         Write-Host "Production URL: https://$webAppName.azurewebsites.net`n" -ForegroundColor White
-    } else {
+    }
+    else {
         Write-Host "Step 6: Skipping slot swap (manual swap required)`n" -ForegroundColor Yellow
         Write-Host "To manually swap slots, run:" -ForegroundColor White
         Write-Host "  az webapp deployment slot swap --name $webAppName --resource-group $resourceGroupName --slot $stagingSlotName`n" -ForegroundColor Gray
@@ -227,35 +246,72 @@ if ($deployFrontend) {
 
         $frontendDockerfilePath = Join-Path $frontendPath "Dockerfile"
 
-        # Update environment.prod.ts with API URL
-        Write-Host "Updating production environment configuration..." -ForegroundColor Yellow
-        $envProdPath = Join-Path $frontendPath "src\environments\environment.prod.ts"
-        $envProdContent = @"
+        # Update environment.dev.ts with API URL and logging configuration
+        Write-Host "Updating dev environment configuration..." -ForegroundColor Yellow
+        $envDevPath = Join-Path $frontendPath "src\environments\environment.dev.ts"
+        $envDevContent = @"
 export const environment = {
   production: true,
-  apiUrl: 'https://$webAppName.azurewebsites.net'
+  apiUrl: 'https://$webAppName.azurewebsites.net',
+  // Application Insights connection string (injected at build time via environment variable)
+  appInsightsConnectionString: '`${APPLICATIONINSIGHTS_CONNECTION_STRING}',
+  // Log Level: 'OFF' | 'ERROR' | 'WARNING' | 'INFO' | 'DEBUG'
+  logLevel: 'DEBUG'
 };
 "@
-        Set-Content -Path $envProdPath -Value $envProdContent -Encoding UTF8
-        Write-Host "Environment configured with API URL: https://$webAppName.azurewebsites.net" -ForegroundColor Green
+        Set-Content -Path $envDevPath -Value $envDevContent -Encoding UTF8
+        Write-Host "Environment configured with API URL and logging: https://$webAppName.azurewebsites.net" -ForegroundColor Green
 
-        # Generate unique tag
+        # Build and scan locally before pushing to ACR
+        if (-not $NoSecurityScan) {
+            Write-Host "Building and scanning Frontend Docker image locally..." -ForegroundColor Yellow
+            Push-Location $frontendPath
+            try {
+                $buildScript = Join-Path $frontendPath "build-localFrontEnd.ps1"
+                & $buildScript -Rebuild -MaxSeverity high
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Security scan failed. Fix vulnerabilities before deploying." -ForegroundColor Red
+                    Write-Host "Review vulnerabilities with: docker scout cves grooveapp-frontend" -ForegroundColor Yellow
+                    Pop-Location
+                    exit 1
+                }
+                Write-Host "✅ Security scan passed - No HIGH or CRITICAL CVEs detected`n" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "Error during build/scan: $_" -ForegroundColor Red
+                Pop-Location
+                exit 1
+            }
+            finally {
+                Pop-Location
+            }
+        }
+
+        # Generate unique tag for grooveapp-frontend repository
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $frontendImageTag = "grooveapp-frontend:$timestamp"
+        $frontendLatestTag = "grooveapp-frontend:latest"
 
-        # Build and push frontend image to ACR
-        Write-Host "Pushing frontend image to ACR with tag: $frontendImageTag" -ForegroundColor Yellow
+        # Build and push frontend image to ACR with both unique and latest tags
+        Write-Host "Pushing image to ACR repository 'grooveapp-frontend' with tags: $timestamp and latest" -ForegroundColor Yellow
         az acr build `
             --registry $acrName `
             --image $frontendImageTag `
-            --image grooveapp-frontend:latest `
+            --image $frontendLatestTag `
             --file $frontendDockerfilePath `
             --build-arg SKIP_AUDIT=true `
-            --build-arg BUILD_CONFIGURATION=production `
+            --build-arg BUILD_CONFIGURATION=dev `
             $frontendPath
 
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Frontend Docker image build failed" -ForegroundColor Red
+            Write-Host "Check the build output above for details" -ForegroundColor Yellow
+            exit 1
+        }
+
         Write-Host "Frontend Docker image built and pushed successfully`n" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Step 7: Skipping Frontend image build (using existing latest image)`n" -ForegroundColor Yellow
     }
 
@@ -276,12 +332,22 @@ export const environment = {
             --configuration-source $frontendWebAppName `
             --output none
         Write-Host "Staging slot created" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Staging slot already exists" -ForegroundColor Green
     }
 
     # Deploy to staging slot
     Write-Host "Step 9: Deploying Frontend to staging slot..." -ForegroundColor Cyan
+    
+    # Configure WEBSITES_PORT for nginx (listens on 8080)
+    az webapp config appsettings set `
+        --name $frontendWebAppName `
+        --resource-group $resourceGroupName `
+        --slot $stagingSlotName `
+        --settings WEBSITES_PORT=8080 `
+        --output none
+    
     az webapp config container set `
         --name $frontendWebAppName `
         --resource-group $resourceGroupName `
@@ -314,12 +380,14 @@ export const environment = {
                 $healthy = $true
                 Write-Host "✅ Frontend staging slot is healthy" -ForegroundColor Green
             }
-        } catch {
+        }
+        catch {
             $retryCount++
             if ($retryCount -lt $maxRetries) {
                 Write-Host "Health check failed, retrying... ($retryCount/$maxRetries)" -ForegroundColor Yellow
                 Start-Sleep -Seconds 10
-            } else {
+            }
+            else {
                 Write-Host "⚠️ Warning: Health check failed after $maxRetries attempts" -ForegroundColor Red
                 Write-Host "You may want to check the logs before swapping:" -ForegroundColor Yellow
                 Write-Host "  az webapp log tail --name $frontendWebAppName --resource-group $resourceGroupName --slot $stagingSlotName" -ForegroundColor White
@@ -347,7 +415,8 @@ export const environment = {
 
         Write-Host "✅ Frontend swap complete!" -ForegroundColor Green
         Write-Host "Production URL: https://$frontendWebAppName.azurewebsites.net`n" -ForegroundColor White
-    } else {
+    }
+    else {
         Write-Host "Step 10: Skipping slot swap (manual swap required)`n" -ForegroundColor Yellow
         Write-Host "To manually swap slots, run:" -ForegroundColor White
         Write-Host "  az webapp deployment slot swap --name $frontendWebAppName --resource-group $resourceGroupName --slot $stagingSlotName`n" -ForegroundColor Gray

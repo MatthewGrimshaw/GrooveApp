@@ -4,7 +4,7 @@
     Build, scan, and test the Groove App API locally in Docker
     
 .DESCRIPTION
-    Comprehensive script for local Docker development:
+    Comprehensive script for local Docker development with multi-environment support:
     1. Build Docker image
     2. Scan for security vulnerabilities (optional)
     3. Run container with Azure authentication
@@ -12,6 +12,10 @@
     
 .PARAMETER Rebuild
     Build the Docker image (includes security scan)
+
+.PARAMETER Environment
+    Target environment: dev (default), staging, or prod
+    Automatically configures SQL Server and Database names
     
 .PARAMETER MaxSeverity
     Maximum allowed vulnerability severity: critical, high, medium, low
@@ -30,12 +34,32 @@
     Start container without rebuilding (uses existing image)
     
 .EXAMPLE
-    .\test-local-api.ps1 -Rebuild
-    .\test-local-api.ps1 -Rebuild -MaxSeverity critical
-    .\test-local-api.ps1 -Rebuild -SkipScan
-    .\test-local-api.ps1 -NoBuild
-    .\test-local-api.ps1 -Logs
-    .\test-local-api.ps1 -Stop
+    .\build-localApi.ps1 -Rebuild
+    Build and run against dev environment (default)
+    
+.EXAMPLE
+    .\build-localApi.ps1 -Rebuild -Environment prod
+    Build and run against production environment
+    
+.EXAMPLE
+    .\build-localApi.ps1 -Rebuild -MaxSeverity critical
+    Build with stricter security scan (only block critical vulnerabilities)
+    
+.EXAMPLE
+    .\build-localApi.ps1 -Rebuild -SkipScan
+    Build without security scan (not recommended)
+    
+.EXAMPLE
+    .\build-localApi.ps1 -NoBuild -Environment staging
+    Run existing image against staging environment
+    
+.EXAMPLE
+    .\build-localApi.ps1 -Logs
+    View container logs
+    
+.EXAMPLE
+    .\build-localApi.ps1 -Stop
+    Stop and remove container
 #>
 
 param(
@@ -45,12 +69,33 @@ param(
     [switch]$SkipScan,
     [switch]$Logs,
     [switch]$Stop,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [ValidateSet("dev", "staging", "prod")]
+    [string]$Environment = "dev"
 )
 
 $containerName = "grooveapp-api-local"
 $imageName = "grooveapp-api"
 $port = 8000
+
+# Environment-specific configuration
+$envConfig = @{
+    dev     = @{
+        SqlServer   = "sql-grooveapp-dev-uhxg.database.windows.net"
+        SqlDatabase = "sqldb-grooveapp-dev"
+    }
+    staging = @{
+        SqlServer   = "sql-grooveapp-staging.database.windows.net"
+        SqlDatabase = "sqldb-grooveapp-staging"
+    }
+    prod    = @{
+        SqlServer   = "sql-grooveapp-prod.database.windows.net"
+        SqlDatabase = "sqldb-grooveapp-prod"
+    }
+}
+
+$sqlServer = $envConfig[$Environment].SqlServer
+$sqlDatabase = $envConfig[$Environment].SqlDatabase
 
 function Write-ColorOutput($ForegroundColor, $Message) {
     $fc = $host.UI.RawUI.ForegroundColor
@@ -150,10 +195,12 @@ if ($Rebuild) {
             Write-ColorOutput Yellow "To fix: docker scout recommendations $imageName"
             Write-ColorOutput Yellow "To override: .\test-local-api.ps1 -Rebuild -MaxSeverity medium"
             exit 1
-        } else {
+        }
+        else {
             Write-ColorOutput Green "✅ Security scan passed (max severity: $MaxSeverity)"
         }
-    } else {
+    }
+    else {
         Write-ColorOutput Yellow "⚠️  Security scan skipped"
     }
 }
@@ -180,18 +227,21 @@ if ($NoBuild -or $Rebuild) {
         }
         $token = $tokenJson | ConvertFrom-Json
         Write-ColorOutput Green "✅ Access token obtained"
-    } catch {
+    }
+    catch {
         Write-ColorOutput Red "❌ Error getting access token: $_"
         exit 1
     }
     
     # Start container with token
-    Write-ColorOutput Yellow "Starting container..."
+    Write-ColorOutput Yellow "Starting container for environment: $Environment"
+    Write-ColorOutput Cyan "  SQL Server: $sqlServer"
+    Write-ColorOutput Cyan "  Database:   $sqlDatabase"
     docker run -d `
         --name $containerName `
         -p ${port}:8000 `
-        -e SQL_SERVER="sql-grooveapp.database.windows.net" `
-        -e SQL_DATABASE="db-grooveapp" `
+        -e SQL_SERVER="$sqlServer" `
+        -e SQL_DATABASE="$sqlDatabase" `
         -e AZURE_ACCESS_TOKEN="$token" `
         $imageName
     
@@ -224,11 +274,13 @@ if ($NoBuild -or $Rebuild) {
                 try {
                     $healthResponse = Invoke-WebRequest -Uri "http://localhost:$port/health" -TimeoutSec 2 -ErrorAction Stop
                     Write-ColorOutput Green "✅ Database connection: Healthy"
-                } catch {
+                }
+                catch {
                     Write-ColorOutput Yellow "⚠️  Database connection: Not configured (expected for local testing)"
                 }
             }
-        } catch {
+        }
+        catch {
             $retryCount++
             Write-ColorOutput Yellow "Waiting... (attempt $retryCount/$maxRetries)"
             Start-Sleep -Seconds 2
@@ -256,16 +308,21 @@ Management:
   .\test-local-api.ps1 -Stop       - Stop container
   .\test-local-api.ps1 -Rebuild    - Rebuild and restart
 "@
-} else {
+}
+else {
     Write-ColorOutput Red "❌ No action specified. Use -Rebuild, -NoBuild, -Logs, or -Stop"
     Write-ColorOutput Yellow @"
 
 Usage:
-  .\test-local-api.ps1 -Rebuild              # Build, scan, and run
-  .\test-local-api.ps1 -Rebuild -SkipScan    # Build and run (skip scan)
-  .\test-local-api.ps1 -NoBuild              # Run existing image
-  .\test-local-api.ps1 -Logs                 # View logs
-  .\test-local-api.ps1 -Stop                 # Stop container
+  .\build-localApi.ps1 -Rebuild                     # Build, scan, and run (dev)
+  .\build-localApi.ps1 -Rebuild -Environment prod   # Build for production
+  .\build-localApi.ps1 -Rebuild -SkipScan           # Build and run (skip scan)
+  .\build-localApi.ps1 -NoBuild                     # Run existing image (dev)
+  .\build-localApi.ps1 -NoBuild -Environment staging # Run for staging
+  .\build-localApi.ps1 -Logs                        # View logs
+  .\build-localApi.ps1 -Stop                        # Stop container
+
+Environments: dev (default), staging, prod
 "@
     exit 1
 }

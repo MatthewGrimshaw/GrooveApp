@@ -50,6 +50,8 @@ RUN pip install --no-cache-dir --upgrade pip>=25.3 \
 
 # Copy application code
 COPY main.py .
+COPY logging_config.py .
+COPY logging_middleware.py .
 
 # Expose port
 EXPOSE 8000

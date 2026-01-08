@@ -42,6 +42,44 @@ variable "tags" {
   default     = {}
 }
 
+# Network Configuration
+
+variable "vnet_address_space" {
+  description = "Address space for the virtual network"
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
+}
+
+variable "app_service_subnet_prefix" {
+  description = "Address prefix for the App Service subnet"
+  type        = list(string)
+  default     = ["10.0.1.0/24"]
+}
+
+variable "private_endpoint_subnet_prefix" {
+  description = "Address prefix for the private endpoint subnet"
+  type        = list(string)
+  default     = ["10.0.2.0/24"]
+}
+
+variable "enable_private_endpoints" {
+  description = "Enable private endpoints for database and other services"
+  type        = bool
+  default     = true
+}
+
+variable "allow_deployment_access" {
+  description = "Allow public access for deployments (GitHub Actions)"
+  type        = bool
+  default     = false
+}
+
+variable "deployment_ip_whitelist" {
+  description = "List of IP addresses to allow for deployments"
+  type        = list(string)
+  default     = []
+}
+
 # Database Configuration
 
 variable "database_type" {
@@ -169,4 +207,25 @@ variable "initial_group_member_ids" {
   description = "List of user object IDs to add to the security group"
   type        = list(string)
   default     = []
+}
+
+# Logging and Monitoring
+variable "log_retention_days" {
+  description = "Number of days to retain logs in Log Analytics workspace"
+  type        = number
+  default     = 30
+  validation {
+    condition     = var.log_retention_days >= 30 && var.log_retention_days <= 730
+    error_message = "Log retention days must be between 30 and 730 days."
+  }
+}
+
+variable "log_level" {
+  description = "Application log level (OFF, ERROR, WARNING, INFO, ON, VERBOSE, DEBUG)"
+  type        = string
+  default     = "INFO"
+  validation {
+    condition     = contains(["OFF", "ERROR", "WARNING", "INFO", "ON", "VERBOSE", "DEBUG"], var.log_level)
+    error_message = "Log level must be one of: OFF, ERROR, WARNING, INFO, ON, VERBOSE, DEBUG."
+  }
 }

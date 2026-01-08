@@ -44,3 +44,50 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_private_endpoint" {
+  description = "Enable private endpoint for SQL Server"
+  type        = bool
+  default     = true
+}
+
+variable "private_endpoint_subnet_id" {
+  description = "Subnet ID for private endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "private_dns_zone_id" {
+  description = "Private DNS zone ID for SQL Server"
+  type        = string
+  default     = ""
+}
+
+variable "allow_deployment_access" {
+  description = "Allow public access for deployments"
+  type        = bool
+  default     = false
+}
+
+variable "deployment_ip_whitelist" {
+  description = "List of IP addresses to whitelist for deployments"
+  type        = list(string)
+  default     = []
+}
+
+variable "api_managed_identity_principal_id" {
+  description = "Principal ID of the API app's managed identity"
+  type        = string
+  default     = ""
+}
+
+variable "enable_sql_initialization" {
+  description = "Enable SQL initialization resources"
+  type        = bool
+  default     = false
+}
+
+variable "log_analytics_workspace_id" {
+  description = "ID of the Log Analytics workspace for diagnostic settings"
+  type        = string
+}

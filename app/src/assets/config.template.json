@@ -1,0 +1,5 @@
+{
+  "apiUrl": "${API_URL}",
+  "appInsightsConnectionString": "${APPLICATIONINSIGHTS_CONNECTION_STRING}",
+  "logLevel": "DEBUG"
+}
