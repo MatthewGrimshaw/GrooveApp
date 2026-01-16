@@ -27,3 +27,23 @@ output "outbound_ip_addresses" {
   description = "Outbound IP addresses of the Web App"
   value       = azurerm_linux_web_app.main.outbound_ip_addresses
 }
+
+output "staging_slot_id" {
+  description = "ID of the staging slot (if created)"
+  value       = var.supports_deployment_slots ? azurerm_linux_web_app_slot.staging[0].id : null
+}
+
+output "staging_slot_name" {
+  description = "Name of the staging slot (if created)"
+  value       = var.supports_deployment_slots ? azurerm_linux_web_app_slot.staging[0].name : null
+}
+
+output "staging_slot_hostname" {
+  description = "Hostname of the staging slot (if created)"
+  value       = var.supports_deployment_slots ? azurerm_linux_web_app_slot.staging[0].default_hostname : null
+}
+
+output "staging_slot_principal_id" {
+  description = "Principal ID of the staging slot managed identity (if created)"
+  value       = var.supports_deployment_slots ? azurerm_linux_web_app_slot.staging[0].identity[0].principal_id : null
+}

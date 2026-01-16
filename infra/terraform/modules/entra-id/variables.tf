@@ -33,9 +33,3 @@ variable "supports_deployment_slots" {
   type        = bool
   default     = false
 }
-
-variable "supports_deployment_slots" {
-  description = "Whether deployment slots are supported (enables staging slot redirect URIs)"
-  type        = bool
-  default     = false
-}

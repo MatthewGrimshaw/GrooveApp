@@ -375,27 +375,36 @@ export const environment = {
 
     while ($retryCount -lt $maxRetries -and -not $healthy) {
         try {
-            $response = Invoke-WebRequest -Uri $frontendStagingUrl -Method Get -TimeoutSec 10 -UseBasicParsing
-            if ($response.StatusCode -eq 200) {
+            # For frontend with Easy Auth, check if we get either 200 (allowed) or 302 (redirect to login)
+            # Both indicate the app is running
+            $response = Invoke-WebRequest -Uri $frontendStagingUrl -Method Get -TimeoutSec 10 -UseBasicParsing -MaximumRedirection 0 -ErrorAction SilentlyContinue
+            if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 302) {
                 $healthy = $true
                 Write-Host "✅ Frontend staging slot is healthy" -ForegroundColor Green
             }
         }
         catch {
-            $retryCount++
-            if ($retryCount -lt $maxRetries) {
-                Write-Host "Health check failed, retrying... ($retryCount/$maxRetries)" -ForegroundColor Yellow
-                Start-Sleep -Seconds 10
+            # Check if it's a redirect (302) which is expected with Easy Auth
+            if ($_.Exception.Response.StatusCode -eq 'Redirect') {
+                $healthy = $true
+                Write-Host "✅ Frontend staging slot is healthy (redirecting to auth)" -ForegroundColor Green
             }
             else {
-                Write-Host "⚠️ Warning: Health check failed after $maxRetries attempts" -ForegroundColor Red
-                Write-Host "You may want to check the logs before swapping:" -ForegroundColor Yellow
-                Write-Host "  az webapp log tail --name $frontendWebAppName --resource-group $resourceGroupName --slot $stagingSlotName" -ForegroundColor White
-                
-                $continue = Read-Host "Continue with swap anyway? (y/N)"
-                if ($continue -ne "y" -and $continue -ne "Y") {
-                    Write-Host "Deployment cancelled`n" -ForegroundColor Red
-                    exit 1
+                $retryCount++
+                if ($retryCount -lt $maxRetries) {
+                    Write-Host "Health check failed, retrying... ($retryCount/$maxRetries)" -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+                else {
+                    Write-Host "⚠️ Warning: Health check failed after $maxRetries attempts" -ForegroundColor Red
+                    Write-Host "You may want to check the logs before swapping:" -ForegroundColor Yellow
+                    Write-Host "  az webapp log tail --name $frontendWebAppName --resource-group $resourceGroupName --slot $stagingSlotName" -ForegroundColor White
+                    
+                    $continue = Read-Host "Continue with swap anyway? (y/N)"
+                    if ($continue -ne "y" -and $continue -ne "Y") {
+                        Write-Host "Deployment cancelled`n" -ForegroundColor Red
+                        exit 1
+                    }
                 }
             }
         }

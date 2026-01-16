@@ -10,9 +10,13 @@
     - All notes (12 chromatic notes)
     - All scales (12 notes × 14 scale types = 168 tests)
     - All arpeggios (12 notes × 28 chord types = 336 tests)
+    - All intervals from each note (12 notes × 13 intervals = 156 tests)
+    - Circle of Fifths keys (3 tests: all, major, minor)
+    - Circle of Fifths progressions (24 tests: 12 major + 12 minor)
+    - Chord extensions (8 chord types with extensions)
     - Reference data endpoints (4 tests)
     - Health check (1 test)
-    TOTAL: 509 comprehensive tests
+    TOTAL: 700+ comprehensive tests
     
 .PARAMETER ApiUrl
     Base URL for the API (default: http://localhost:8000)
@@ -33,6 +37,38 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+
+# Robust path resolution for centralized logging (works in VS Code, ISE, terminal)
+$scriptPath = if ($PSScriptRoot) { 
+    $PSScriptRoot 
+}
+elseif ($psISE) { 
+    Split-Path -Parent $psISE.CurrentFile.FullPath 
+}
+elseif ($null -ne $psEditor) {
+    Split-Path -Parent $psEditor.GetEditorContext().CurrentFile.Path
+}
+else {
+    $PWD.Path
+}
+
+# Find repository root by looking for .git folder
+$repoRoot = $scriptPath
+while ($repoRoot -and -not (Test-Path (Join-Path $repoRoot ".git"))) {
+    $repoRoot = Split-Path -Parent $repoRoot
+}
+
+if (-not $repoRoot) {
+    # Fallback: assume we're in /api/ subdirectory
+    $repoRoot = Split-Path -Parent $scriptPath
+}
+
+$logDir = Join-Path $repoRoot "logs"
+
+# Ensure logs directory exists
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
 
 # Color output helpers
 function Write-Success { param([string]$Message) Write-Host "✅ $Message" -ForegroundColor Green }
@@ -286,6 +322,61 @@ Test-Endpoint -Url "$ApiUrl/scales" -Description "All Scale Types"
 Test-Endpoint -Url "$ApiUrl/chords" -Description "All Chord Types"
 Test-Endpoint -Url "$ApiUrl/intervals" -Description "All Intervals"
 
+# Test intervals from each note
+Write-Host "`n------------------------------------------------" -ForegroundColor Cyan
+Write-Info "Testing Intervals From Each Note: $($notes.Count) notes × $($intervals.Count) intervals = $($notes.Count * $intervals.Count) tests"
+
+$intervalProgress = 0
+foreach ($note in $notes) {
+    $intervalProgress++
+    $url = "$ApiUrl/intervals/$([uri]::EscapeDataString($note))"
+    $desc = "Intervals from $note"
+    
+    if ($Verbose -or ($intervalProgress % 10 -eq 0)) {
+        Write-Host "Progress: $intervalProgress / $($notes.Count) - Testing intervals from $note" -ForegroundColor Gray
+    }
+    
+    Test-Endpoint -Url $url -Description $desc -ValidateNotes
+}
+
+# Test Circle of Fifths endpoints
+Write-Host "`n------------------------------------------------" -ForegroundColor Cyan
+Write-Info "Testing Circle of Fifths Endpoints..."
+
+# Test Circle of Fifths keys
+Test-Endpoint -Url "$ApiUrl/circle-of-fifths/keys" -Description "Circle of Fifths - All Keys"
+Test-Endpoint -Url "$ApiUrl/circle-of-fifths/keys?scale_type=1" -Description "Circle of Fifths - Major Keys Only"
+Test-Endpoint -Url "$ApiUrl/circle-of-fifths/keys?scale_type=2" -Description "Circle of Fifths - Minor Keys Only"
+
+# Test Circle of Fifths progressions for all keys
+Write-Host "`n------------------------------------------------" -ForegroundColor Cyan
+Write-Info "Testing Circle of Fifths Progressions: $($notes.Count) notes × 2 scale types = $(($notes.Count * 2)) tests"
+
+$progressionProgress = 0
+foreach ($note in $notes) {
+    # Major progression
+    $progressionProgress++
+    $url = "$ApiUrl/circle-of-fifths/progression/$([uri]::EscapeDataString($note))?scale_type=1"
+    $desc = "Circle of Fifths Progression: $note Major"
+    
+    if ($Verbose -or ($progressionProgress % 5 -eq 0)) {
+        Write-Host "Progress: $progressionProgress / $(($notes.Count * 2)) - Testing $note Major progression" -ForegroundColor Gray
+    }
+    
+    Test-Endpoint -Url $url -Description $desc
+    
+    # Minor progression
+    $progressionProgress++
+    $url = "$ApiUrl/circle-of-fifths/progression/$([uri]::EscapeDataString($note))?scale_type=2"
+    $desc = "Circle of Fifths Progression: $note Minor"
+    
+    if ($Verbose -or ($progressionProgress % 5 -eq 0)) {
+        Write-Host "Progress: $progressionProgress / $(($notes.Count * 2)) - Testing $note Minor progression" -ForegroundColor Gray
+    }
+    
+    Test-Endpoint -Url $url -Description $desc
+}
+
 # Test chord extensions for each chord type that has extensions
 Write-Host "`n------------------------------------------------" -ForegroundColor Cyan
 Write-Info "Testing Chord Extensions Endpoints..."
@@ -362,8 +453,9 @@ if ($script:failedTests -gt 0) {
         Write-Warning "... and $($script:failedEndpoints.Count - 20) more failures"
     }
     
-    # Export full failure report
-    $reportPath = "test-failures-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    # Export full failure report to centralized logs folder
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportPath = Join-Path $logDir "test-api-failures-$timestamp.json"
     $script:failedEndpoints | ConvertTo-Json -Depth 10 | Out-File $reportPath
     Write-Info "Full failure report saved to: $reportPath"
     

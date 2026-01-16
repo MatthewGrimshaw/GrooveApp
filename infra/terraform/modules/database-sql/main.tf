@@ -22,6 +22,16 @@ resource "azurerm_mssql_server" "main" {
   tags = var.tags
 }
 
+# SQL Server Auditing Policy - enables auditing to Azure Monitor
+resource "azurerm_mssql_server_extended_auditing_policy" "main" {
+  server_id              = azurerm_mssql_server.main.id
+  log_monitoring_enabled = true
+  retention_in_days      = 30
+
+  # When log_monitoring_enabled = true, audit logs are sent to Azure Monitor
+  # Diagnostic settings (below) route them to Log Analytics workspace
+}
+
 resource "azurerm_mssql_database" "main" {
   name           = var.database_name
   server_id      = azurerm_mssql_server.main.id
@@ -30,6 +40,13 @@ resource "azurerm_mssql_database" "main" {
   zone_redundant = false
 
   tags = var.tags
+}
+
+# Database-level auditing policy
+resource "azurerm_mssql_database_extended_auditing_policy" "main" {
+  database_id            = azurerm_mssql_database.main.id
+  log_monitoring_enabled = true
+  retention_in_days      = 30
 }
 
 # Firewall rule to allow Azure services (only when public access is enabled)
@@ -84,6 +101,19 @@ resource "azurerm_private_endpoint" "sql" {
   }
 
   tags = var.tags
+}
+
+# Diagnostic Settings for SQL Server - captures audit logs
+resource "azurerm_monitor_diagnostic_setting" "sql_server" {
+  name                       = "${var.server_name}-diagnostics"
+  target_resource_id         = azurerm_mssql_server.main.id
+  log_analytics_workspace_id = var.log_analytics_workspace_id
+
+  # Metrics only - DevOpsOperationsAudit is not supported on this resource type
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
 }
 
 # Diagnostic Settings for SQL Database

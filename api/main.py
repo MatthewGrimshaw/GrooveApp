@@ -188,22 +188,64 @@ logger.info(
 
 # Database connection
 def get_access_token():
-    """Get access token using DefaultAzureCredential (Azure) or environment variable (local)"""
-    # Check for environment variable first (best for local Docker testing)
+    """Get access token using ManagedIdentityCredential (Azure) or DefaultAzureCredential (local)"""
+    import base64
+    import json
+    
+    # Check for environment variable first (explicit token for local Docker testing)
     token = os.environ.get('AZURE_ACCESS_TOKEN')
     if token:
+        logger.info("Using AZURE_ACCESS_TOKEN environment variable")
         return token
     
     try:
-        # Use DefaultAzureCredential (works in Azure with managed identity)
-        credential = DefaultAzureCredential()
+        # Try ManagedIdentityCredential first (best for Azure App Service)
+        from azure.identity import ManagedIdentityCredential
+        credential = ManagedIdentityCredential()
         token_obj = credential.get_token("https://database.windows.net/.default")
+        
+        # Decode token to see which principal it's for (for debugging)
+        try:
+            # JWT tokens have 3 parts: header.payload.signature
+            token_parts = token_obj.token.split('.')
+            if len(token_parts) >= 2:
+                # Decode payload (add padding if needed)
+                payload = token_parts[1]
+                padding = 4 - len(payload) % 4
+                if padding != 4:
+                    payload += '=' * padding
+                decoded = base64.urlsafe_b64decode(payload)
+                token_info = json.loads(decoded)
+                principal_name = token_info.get('appid', token_info.get('oid', 'unknown'))
+                logger.info(f"Acquired token for principal: {token_info.get('app_displayname', principal_name)} (oid: {token_info.get('oid', 'N/A')})")
+        except Exception as decode_error:
+            logger.warning(f"Could not decode token for debugging: {decode_error}")
+        
         return token_obj.token
-    except Exception as e:
-        raise Exception(f"Failed to get access token. Either set AZURE_ACCESS_TOKEN environment variable or configure managed identity: {str(e)}")
+    except Exception as managed_identity_error:
+        logger.warning(f"ManagedIdentityCredential failed: {managed_identity_error}")
+        # Fall back to DefaultAzureCredential for local development
+        # This tries Azure CLI, VS Code, Environment Variables, etc.
+        try:
+            credential = DefaultAzureCredential()
+            token_obj = credential.get_token("https://database.windows.net/.default")
+            logger.info("Using DefaultAzureCredential fallback")
+            return token_obj.token
+        except Exception as default_cred_error:
+            raise Exception(
+                f"Failed to get access token using both ManagedIdentityCredential and DefaultAzureCredential.\n\n"
+                f"ManagedIdentityCredential error: {str(managed_identity_error)}\n"
+                f"DefaultAzureCredential error: {str(default_cred_error)}\n\n"
+                f"For Azure App Service: Make sure system-assigned managed identity is enabled.\n"
+                f"For local development: Run 'az login' or set AZURE_ACCESS_TOKEN environment variable."
+            )
 
-def get_db_connection():
-    """Create database connection using Entra ID authentication"""
+def get_db_connection(timeout_seconds=30):
+    """Create database connection using Entra ID authentication
+    
+    Args:
+        timeout_seconds: Connection timeout in seconds (default: 30)
+    """
     server = os.environ.get('SQL_SERVER')
     database = os.environ.get('SQL_DATABASE')
     
@@ -221,7 +263,7 @@ def get_db_connection():
         # Connect using ODBC Driver 18 with access token attribute
         try:
             driver = 'ODBC Driver 18 for SQL Server'
-            conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes'
+            conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes;Connection Timeout={timeout_seconds}'
             # SQL_COPT_SS_ACCESS_TOKEN = 1256
             conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
             return conn
@@ -235,20 +277,44 @@ def get_db_connection():
                 if 'Token is expired' in error_msg:
                     raise Exception(
                         f"Database authentication failed: {error_msg}\n\n"
-                        "Your Azure AD access token has expired.\n\n"
+                        "The Azure AD access token has expired.\n\n"
                         "To fix this:\n"
-                        "1. Restart the API container/service to get a fresh token\n"
-                        "2. Or manually refresh your Azure CLI login: az login"
+                        "1. Restart the API web app to get a fresh managed identity token\n"
+                        "2. Or for local development: az login"
                     )
                 else:
+                    # Parse the token to determine which principal failed to authenticate
+                    principal_info = "the web app's managed identity"
+                    try:
+                        import base64, json
+                        token_parts = access_token.split('.')
+                        if len(token_parts) >= 2:
+                            payload = token_parts[1]
+                            padding = 4 - len(payload) % 4
+                            if padding != 4:
+                                payload += '=' * padding
+                            decoded = base64.urlsafe_b64decode(payload)
+                            token_info = json.loads(decoded)
+                            # Check if it's a user token or service principal token
+                            if token_info.get('upn'):  # User Principal Name = user token
+                                principal_info = f"user {token_info.get('upn')}"
+                            elif token_info.get('app_displayname'):  # App display name = managed identity
+                                principal_info = f"managed identity '{token_info.get('app_displayname')}'"
+                            elif token_info.get('oid'):
+                                principal_info = f"principal (OID: {token_info.get('oid')})"
+                    except Exception:
+                        pass  # Use default principal_info
+                    
                     raise Exception(
-                        f"Database authentication failed: {error_msg}\n\n"
-                        "Your Azure AD user doesn't have permission to access the database.\n"
-                        "Even though you're an Entra ID admin on the SQL Server, you need to be added as a user in the database.\n\n"
-                        "To fix this:\n"
-                        "1. Get your email: az ad signed-in-user show --query userPrincipalName -o tsv\n"
-                        "2. Edit infra/setup-music-tables.sql and set @DeveloperEmail to your email\n"
-                        "3. Run: sqlcmd -S {server} -d {database} -G -i infra/setup-music-tables.sql"
+                        f"Database authentication failed for {principal_info}: {error_msg}\n\n"
+                        "The database principal doesn't have permission to access this database.\n\n"
+                        "Possible fixes:\n"
+                        "1. For managed identity issues: Re-run Terraform to recreate database users:\n"
+                        "   cd infra/terraform && terraform apply -var-file=environments/dev.tfvars\n\n"
+                        "2. For local development (user authentication):\n"
+                        "   - Get your email: az ad signed-in-user show --query userPrincipalName -o tsv\n"
+                        "   - Edit infra/setup-music-tables.sql and set @DeveloperEmail to your email\n"
+                        "   - Run: sqlcmd -S {server} -d {database} -G -i infra/setup-music-tables.sql"
                     )
             else:
                 raise Exception(f"Database connection failed ({error_code}): {error_msg}")
@@ -291,50 +357,89 @@ async def health_check(request: Request):
         "checks": {}
     }
     
-    # Database connectivity check
-    try:
-        db_start = time.time()
-        
-        with DatabaseLoggingMiddleware(logger, "Health check DB connection", request):
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-            conn.close()
+    # Database connectivity check with retry logic
+    db_healthy = False
+    db_error_msg = None
+    max_retries = 3
+    retry_delay = 1  # Start with 1 second
+    db_timeout = 10  # 10 second timeout per attempt
+    
+    for attempt in range(max_retries):
+        try:
+            db_start = time.time()
             
-        db_time = (time.time() - db_start) * 1000
-        
-        health_response["checks"]["database"] = {
-            "status": "healthy",
-            "responseTimeMs": round(db_time, 2)
-        }
-        
-        logger.debug(
-            "Health check passed",
-            extra={
-                'operation_id': operation_id,
-                'user_id': 'system',
-                'request_path': '/health',
-                'duration_ms': round(db_time, 2)
+            with DatabaseLoggingMiddleware(logger, f"Health check DB connection (attempt {attempt + 1}/{max_retries})", request):
+                conn = get_db_connection(timeout_seconds=db_timeout)
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.close()
+                conn.close()
+                
+            db_time = (time.time() - db_start) * 1000
+            
+            health_response["checks"]["database"] = {
+                "status": "healthy",
+                "responseTimeMs": round(db_time, 2),
+                "attempts": attempt + 1
             }
-        )
-    except Exception as e:
-        logger.error(
-            f"Health check failed: {str(e)}",
-            extra={
-                'operation_id': operation_id,
-                'user_id': 'system',
-                'request_path': '/health',
-                'error': str(e)
-            },
-            exc_info=True
-        )
-        health_response["status"] = "unhealthy"
+            
+            db_healthy = True
+            
+            logger.debug(
+                "Health check database check passed",
+                extra={
+                    'operation_id': operation_id,
+                    'user_id': 'system',
+                    'request_path': '/health',
+                    'duration_ms': round(db_time, 2),
+                    'attempts': attempt + 1
+                }
+            )
+            break  # Success, exit retry loop
+            
+        except Exception as e:
+            db_error_msg = str(e)
+            
+            # Check if this is a timeout error (likely VNet integration not ready)
+            is_timeout = 'timeout' in str(e).lower() or 'HYT00' in str(e)
+            
+            if attempt < max_retries - 1 and is_timeout:
+                logger.warning(
+                    f"Health check database connection attempt {attempt + 1} failed (timeout), retrying in {retry_delay}s",
+                    extra={
+                        'operation_id': operation_id,
+                        'user_id': 'system',
+                        'request_path': '/health',
+                        'error': str(e),
+                        'attempt': attempt + 1
+                    }
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error(
+                    f"Health check database connection failed after {attempt + 1} attempts: {str(e)}",
+                    extra={
+                        'operation_id': operation_id,
+                        'user_id': 'system',
+                        'request_path': '/health',
+                        'error': str(e),
+                        'attempts': attempt + 1
+                    },
+                    exc_info=(attempt == max_retries - 1)  # Only log full stack trace on final attempt
+                )
+                break
+    
+    # Handle database check failure - mark as degraded but still return 200 OK
+    # This allows the app to be considered healthy during startup while VNet integration establishes
+    if not db_healthy:
+        health_response["status"] = "degraded"  # Changed from "unhealthy" to allow startup
         health_response["database"] = "disconnected"
         health_response["checks"]["database"] = {
             "status": "unhealthy",
-            "error": str(e),
-            "errorType": type(e).__name__
+            "error": db_error_msg,
+            "attempts": max_retries,
+            "note": "Database may be unreachable during VNet integration setup. Service will retry."
         }
     
     # Azure token check

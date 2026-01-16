@@ -83,6 +83,124 @@ Each task has ONE authoritative script:
 - DO NOT create: `quick-test.ps1`, `test-v2.ps1`, etc.
 - UPDATE this file when adding new endpoints
 
+## Log File Management
+
+### ⚠️ CRITICAL: Centralized Log Storage Rule
+
+**ALL log files MUST be stored in `/logs/` directory at repository root.**
+
+This is a **STRICT, NON-NEGOTIABLE** rule that MUST be followed for:
+- ✅ Troubleshooting logs
+- ✅ Deployment logs
+- ✅ Test execution logs
+- ✅ Debug output files
+- ✅ Performance logs
+- ✅ API response captures
+- ✅ Azure CLI output
+- ✅ Terraform logs
+- ✅ Any diagnostic or debugging output
+
+### Log File Placement Rules
+
+**ALWAYS place logs in `/logs/` with descriptive filenames:**
+
+```powershell
+# ✅ CORRECT - Robust path resolution (works in VS Code, ISE, terminal)
+$scriptPath = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+$repoRoot = $scriptPath
+while ($repoRoot -and -not (Test-Path (Join-Path $repoRoot ".git"))) {
+    $repoRoot = Split-Path -Parent $repoRoot
+}
+if (-not $repoRoot) { $repoRoot = Split-Path -Parent $scriptPath }
+
+$logFile = Join-Path $repoRoot "logs" "deployment-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$logFile = Join-Path $repoRoot "logs" "test-results-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+$logFile = Join-Path $repoRoot "logs" "troubleshooting-circle-of-fifths.log"
+
+# ❌ WRONG - Never scatter logs across repository
+$logFile = "$PSScriptRoot\debug.log"           # Don't put in script directory
+$logFile = "$PSScriptRoot\..\api-logs.txt"    # Don't put in root
+$logFile = "$PSScriptRoot\temp\output.json"   # Don't create temp folders
+```
+
+**Naming Convention:**
+- Use descriptive names: `deployment-{timestamp}.log`, `test-api-{date}.log`
+- Include timestamps for sequential runs
+- Use kebab-case: `troubleshooting-auth-issue.log`
+- Group related logs: `terraform-apply-{timestamp}.log`
+
+**Git Exclusion:**
+- `/logs/` is excluded in `.gitignore` - logs are NEVER committed
+- This prevents repository pollution with diagnostic files
+- Ensures clean commit history without temporary files
+
+**Why This Matters:**
+- 🎯 Single location to find ALL troubleshooting data
+- 🧹 Prevents log files scattered across repository
+- 🚫 Logs never committed to version control
+- 📊 Easy to review recent debugging sessions
+- 🗑️ Simple cleanup: delete `/logs/` folder
+
+### Example Usage in Scripts
+
+```powershell
+# Robust path resolution for /logs/ folder (works in VS Code, PowerShell ISE, and terminal)
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+
+# Get script directory - works in VS Code, ISE, and direct execution
+$scriptPath = if ($PSScriptRoot) { 
+    $PSScriptRoot 
+}
+elseif ($psISE) { 
+    Split-Path -Parent $psISE.CurrentFile.FullPath 
+}
+elseif ($null -ne $psEditor) {
+    Split-Path -Parent $psEditor.GetEditorContext().CurrentFile.Path
+}
+else {
+    $PWD.Path
+}
+
+# Navigate to repository root and find logs folder
+$repoRoot = $scriptPath
+while ($repoRoot -and -not (Test-Path (Join-Path $repoRoot ".git"))) {
+    $repoRoot = Split-Path -Parent $repoRoot
+}
+
+if (-not $repoRoot) {
+    # Fallback: assume we're in a subdirectory and go up one level
+    $repoRoot = Split-Path -Parent $scriptPath
+}
+
+$logDir = Join-Path $repoRoot "logs"
+
+# Ensure logs directory exists
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+# Create log file with descriptive name
+$logFile = Join-Path $logDir "deployment-$timestamp.log"
+
+# Write to log
+"Starting deployment..." | Tee-Object -FilePath $logFile -Append
+```
+
+**Alternative: Simpler approach for scripts in known locations**
+
+```powershell
+# If your script is always in /api/ or /infra/ subdirectory
+$scriptPath = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+$logDir = Join-Path (Split-Path -Parent $scriptPath) "logs"
+
+# Or hardcode from workspace root for VS Code tasks
+$logDir = Join-Path $env:WORKSPACE "logs"  # When running as VS Code task
+
+# Create log with timestamp
+$logFile = Join-Path $logDir "my-script-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+```
+
+
 ## Repository Structure
 
 ```
@@ -104,11 +222,17 @@ grooveapp/
 │   ├── Dockerfile                # Multi-stage Docker build
 │   └── build-localFrontEnd.ps1   # ⚠️ ONLY Frontend build script
 │
-└── infra/                        # Infrastructure as Code
-    ├── build-appInfra.ps1        # Deploy to Azure
-    ├── deploy-updates.ps1        # Update existing deployment
-    ├── cleanup-appInfra.ps1      # Delete Azure resources
-    └── setup-music-tables.sql    # Database schema & data
+├── infra/                        # Infrastructure as Code
+│   ├── build-appInfra.ps1        # Deploy to Azure
+│   ├── deploy-updates.ps1        # Update existing deployment
+│   ├── cleanup-appInfra.ps1      # Delete Azure resources
+│   └── setup-music-tables.sql    # Database schema & data
+│
+└── logs/                         # ⚠️ ALL logs go here (git-ignored)
+    ├── deployment-*.log          # Deployment logs
+    ├── test-*.log                # Test execution logs
+    ├── troubleshooting-*.log     # Debug and diagnostic logs
+    └── terraform-*.log           # Infrastructure logs
 ```
 
 ## Code Standards
@@ -409,3 +533,370 @@ TypeScript Interface → Angular Template → DOM Rendering
 3. **Testing**: Use `test-apiResponses.ps1`, don't create alternatives.
 4. **Security**: Maintain CVE scanning, no exceptions.
 5. **Data flow**: Always: Database → API → Frontend, never Frontend → Database.
+## Logging & Monitoring
+
+### Overview
+
+GrooveApp uses **Azure Application Insights** for centralized logging, monitoring, and diagnostics in Azure environments. Local development uses console logging.
+
+**Environment Variables:**
+- `APPLICATIONINSIGHTS_CONNECTION_STRING`: App Insights connection string (Azure only)
+- `LOG_LEVEL`: Controls verbosity - `OFF`, `ERROR`, `WARNING`, `INFO`, `DEBUG`
+
+### API Logging (Python/FastAPI)
+
+**Framework: OpenCensus** (configured in `api/logging_config.py`)
+
+#### Correct Logging Pattern
+
+```python
+# ✅ CORRECT: Use logger with extra context
+from logging_config import configure_logging
+
+# Initialize logger at module level
+logger = configure_logging(
+    app_insights_connection_string=os.getenv('APPLICATIONINSIGHTS_CONNECTION_STRING'),
+    log_level=os.getenv('LOG_LEVEL', 'INFO'),
+    service_name='grooveapp-api'
+)
+
+# Log with structured context
+logger.info(
+    "Processing chord extensions request",
+    extra={
+        'operation_id': getattr(request.state, 'operation_id', 'N/A'),
+        'user_id': getattr(request.state, 'user_id', 'anonymous'),
+        'request_path': '/chords/extensions',
+        'chord_type_id': chord_type_id,
+        'root_note': root_note
+    }
+)
+
+# Log errors with exception info
+logger.error(
+    f"Database query failed: {str(e)}",
+    extra={
+        'operation_id': operation_id,
+        'user_id': 'system',
+        'request_path': '/database-error',
+        'error_type': type(e).__name__
+    },
+    exc_info=True  # Includes full stack trace
+)
+```
+
+#### Required Context Fields
+
+**All log entries MUST include these fields in `extra`:**
+- `operation_id`: Unique ID for request correlation (from `request.state.operation_id`)
+- `user_id`: User identifier or `'anonymous'` or `'system'`
+- `request_path`: API endpoint path (e.g., `/chords/extensions`)
+
+**Optional but recommended:**
+- `duration_ms`: Operation duration in milliseconds
+- `status_code`: HTTP response status
+- `error_type`: Exception class name
+- Custom fields: `chord_type_id`, `root_note`, etc.
+
+#### Log Levels
+
+```python
+# OFF: Disable all logging (production troubleshooting only)
+LOG_LEVEL = 'OFF'
+
+# ERROR: Only errors and exceptions
+logger.error("Database connection failed", extra={...})
+
+# WARNING: Warnings and above
+logger.warning("Deprecated endpoint called", extra={...})
+
+# INFO: Normal operations (default)
+logger.info("Request processed successfully", extra={...})
+
+# DEBUG/VERBOSE: Detailed diagnostics
+logger.debug("Executing SQL query", extra={'query': sql, ...})
+```
+
+#### Automatic Request Logging
+
+The `RequestLoggingMiddleware` automatically logs:
+- ✅ Request start (INFO)
+- ✅ Request completion with duration (INFO)
+- ✅ Request errors (ERROR with exc_info)
+
+```python
+# Already configured in main.py - NO CODE CHANGES NEEDED
+app.add_middleware(RequestLoggingMiddleware, logger=logger)
+```
+
+#### Database Logging Pattern
+
+```python
+# Use DatabaseLoggingMiddleware for query tracking
+with DatabaseLoggingMiddleware(logger, "Fetching chord extensions", request):
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+# Automatically logs query duration
+```
+
+### Frontend Logging (TypeScript/Angular)
+
+**Framework: @microsoft/applicationinsights-web** (configured in `app/src/app/services/logging.service.ts`)
+
+#### Correct Logging Pattern
+
+```typescript
+import { LoggingService } from '../services/logging.service';
+
+export class MyComponent implements OnInit {
+  constructor(private logger: LoggingService) {}
+
+  ngOnInit() {
+    // ✅ CORRECT: Use LoggingService with context
+    this.logger.info('Component initialized', {
+      component: 'ChordExtensionsComponent',
+      operationId: this.logger.generateOperationId()
+    });
+
+    this.loadData();
+  }
+
+  loadData() {
+    this.musicApi.getChordExtensions(1).subscribe({
+      next: (data) => {
+        this.logger.info('Chord extensions loaded', {
+          component: 'ChordExtensionsComponent',
+          count: data.length
+        });
+      },
+      error: (error) => {
+        this.logger.error('Failed to load chord extensions', error, {
+          component: 'ChordExtensionsComponent',
+          endpoint: '/chords/1/extensions'
+        });
+      }
+    });
+  }
+}
+```
+
+#### Log Methods
+
+```typescript
+// INFO: General information
+this.logger.info('User selected scale', {
+  component: 'ScaleDisplay',
+  scaleType: scaleTypeId,
+  rootNote: rootNote
+});
+
+// WARNING: Non-critical issues
+this.logger.warning('API call took longer than expected', {
+  component: 'MusicService',
+  duration: 5000,
+  endpoint: '/scales'
+});
+
+// ERROR: Errors and exceptions
+this.logger.error('API call failed', error, {
+  component: 'MusicService',
+  endpoint: '/chords',
+  statusCode: error.status
+});
+
+// DEBUG: Detailed diagnostics
+this.logger.debug('Rendering musical staff', {
+  component: 'MusicalStaff',
+  noteCount: notes.length
+});
+```
+
+#### Automatic HTTP Logging
+
+The `loggingInterceptor` automatically logs all HTTP requests/responses:
+- ✅ Request initiated
+- ✅ Response received with duration
+- ✅ HTTP errors with status codes
+
+```typescript
+// Already configured in app.config.ts - NO CODE CHANGES NEEDED
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(
+      withInterceptors([
+        loggingInterceptor,  // Logs all HTTP traffic
+        authInterceptor
+      ])
+    )
+  ]
+};
+```
+
+#### Track Custom Events
+
+```typescript
+// Track user interactions
+this.logger.trackEvent('UserSelectedChord', {
+  chordType: 'Major7',
+  rootNote: 'C',
+  extensions: '9, 13'
+});
+
+// Track performance metrics
+this.logger.trackMetric('ScaleRenderTime', renderDuration, {
+  scaleType: 'Major',
+  noteCount: 7
+});
+```
+
+### Logging Anti-Patterns
+
+❌ **DON'T** use `console.log()` directly in production code:
+```typescript
+// ❌ WRONG: Bypasses Application Insights
+console.log('User clicked button');
+
+// ✅ CORRECT: Uses logging service
+this.logger.info('User clicked button', { component: 'MyComponent' });
+```
+
+❌ **DON'T** log without context:
+```python
+# ❌ WRONG: No operation_id, user_id, or request_path
+logger.info("Processing request")
+
+# ✅ CORRECT: Includes all required context
+logger.info("Processing request", extra={
+    'operation_id': operation_id,
+    'user_id': 'anonymous',
+    'request_path': '/chords'
+})
+```
+
+❌ **DON'T** log sensitive data:
+```python
+# ❌ WRONG: Logs passwords, tokens, etc.
+logger.info(f"User logged in: {username}/{password}")
+
+# ✅ CORRECT: Log only non-sensitive info
+logger.info("User logged in", extra={
+    'user_id': user_id,
+    'auth_method': 'Entra ID'
+})
+```
+
+❌ **DON'T** catch exceptions without logging:
+```python
+# ❌ WRONG: Silent failures
+try:
+    process_data()
+except Exception:
+    pass  # Error is lost
+
+# ✅ CORRECT: Log and re-raise or handle
+try:
+    process_data()
+except Exception as e:
+    logger.error(f"Processing failed: {e}", extra={...}, exc_info=True)
+    raise HTTPException(status_code=500, detail=str(e))
+```
+
+### Querying Logs in Application Insights
+
+**Azure Portal → Application Insights → Logs (KQL)**
+
+```kusto
+// Find all API errors in last 24 hours
+traces
+| where cloud_RoleName == "grooveapp-api"
+| where severityLevel >= 3  // ERROR and above
+| where timestamp > ago(24h)
+| project timestamp, message, severityLevel, customDimensions
+| order by timestamp desc
+
+// Find slow API requests
+requests
+| where cloud_RoleName == "grooveapp-api"
+| where duration > 1000  // > 1 second
+| project timestamp, name, duration, resultCode
+| order by duration desc
+
+// Trace a specific operation
+traces
+| where customDimensions.operation_id == "abc-123-def-456"
+| project timestamp, severityLevel, message
+| order by timestamp asc
+
+// Count errors by endpoint
+exceptions
+| where cloud_RoleName == "grooveapp-api"
+| summarize count() by operation_Name
+| order by count_ desc
+```
+
+### Log Level Configuration
+
+**Local Development (`docker-compose.yml` or `.env`):**
+```yaml
+environment:
+  - LOG_LEVEL=DEBUG
+  - APPLICATIONINSIGHTS_CONNECTION_STRING=  # Empty for local
+```
+
+**Azure App Service (Terraform `main.tf`):**
+```terraform
+app_settings = {
+  LOG_LEVEL = "INFO"  # Production
+  APPLICATIONINSIGHTS_CONNECTION_STRING = module.log_analytics.app_insights_connection_string
+}
+```
+
+### Monitoring Best Practices
+
+1. **Use structured logging**: Always include context in `extra` parameter
+2. **Set appropriate log levels**: DEBUG locally, INFO in production
+3. **Log at entry/exit points**: Start/end of requests, operations
+4. **Log state changes**: User actions, data mutations
+5. **Log errors with context**: Include `exc_info=True` for stack traces
+6. **Use correlation IDs**: Track requests across frontend → API → database
+7. **Monitor performance**: Log duration for slow operations
+8. **Alert on errors**: Configure alerts for ERROR logs in App Insights
+
+### Required Logging for New Features
+
+When adding new API endpoints or frontend features:
+
+1. **API Endpoint**: Must log request start, completion, and any errors
+2. **Frontend Component**: Must log initialization and key user actions
+3. **Database Operations**: Must log query execution and errors
+4. **Error Handling**: Must log all exceptions with full context
+5. **Performance**: Must log duration for operations > 100ms
+
+### Troubleshooting: No Data in App Insights
+
+**Checklist:**
+1. ✅ `APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable set
+2. ✅ Connection string format: `InstrumentationKey=...;IngestionEndpoint=...`
+3. ✅ Network connectivity to `*.in.applicationinsights.azure.com`
+4. ✅ Logs include required `extra` fields (`operation_id`, `user_id`, `request_path`)
+5. ✅ Wait 2-5 minutes for data ingestion (not real-time)
+6. ✅ Check Azure portal for ingestion errors
+7. ✅ Verify `LOG_LEVEL` is not set to `OFF`
+
+**Test Logging:**
+```python
+# API: Test log ingestion
+logger.info("Test log entry", extra={
+    'operation_id': 'test-123',
+    'user_id': 'system',
+    'request_path': '/test'
+})
+```
+
+```typescript
+// Frontend: Test log ingestion
+this.logger.info('Test log entry', {
+  component: 'TestComponent',
+  operationId: 'test-123'
+});
+```

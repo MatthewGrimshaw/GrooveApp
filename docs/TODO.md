@@ -21,10 +21,7 @@
 ## Infra Dev
 
 - App Gateway with WAF
-- Terraform
-  - easy auth not enabled
-  - why three staging slots? what is auth?
-  - database authentication not working: is the webapps managed identity added as a login to the database? 
+
 - Github repos - security
   - test actions for docker and dependabot
 - Front Door with WAF
@@ -42,6 +39,8 @@
 - Deploy Database script - run SQL queries as part of deployment
 - Logging
   - Alerts
+    - 401 
+  - Diagnostic settings on App Insights
 
 ## Database Dev
 

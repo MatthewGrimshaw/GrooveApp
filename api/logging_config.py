@@ -6,11 +6,7 @@ import logging
 import sys
 import os
 from typing import Optional
-from opencensus.ext.azure.log_exporter import AzureLogHandler
-from opencensus.ext.azure.trace_exporter import AzureExporter
-from opencensus.trace.samplers import ProbabilitySampler
-from opencensus.trace import config_integration
-from opencensus.trace.tracer import Tracer
+from azure.monitor.opentelemetry import configure_azure_monitor
 
 
 class LogLevelConfig:
@@ -86,32 +82,23 @@ def configure_logging(
     console_handler.setFormatter(console_format)
     logger.addHandler(console_handler)
     
-    # Azure Application Insights handler (only if connection string provided)
+    # Azure Application Insights configuration (only if connection string provided)
     if app_insights_connection_string and log_level.upper() != 'OFF':
         try:
-            # Configure OpenCensus integrations for automatic tracking
-            config_integration.trace_integrations(['logging', 'requests'])
-            
-            # Add Azure Log Handler
-            azure_handler = AzureLogHandler(
-                connection_string=app_insights_connection_string
-            )
-            azure_handler.setLevel(level)
-            
-            # Add custom properties to all logs
-            azure_handler.add_telemetry_processor(
-                lambda envelope: envelope.__dict__.update({
-                    'tags': {
-                        **envelope.tags,
-                        'ai.cloud.role': service_name,
-                        'ai.cloud.roleInstance': os.getenv('WEBSITE_INSTANCE_ID', 'local')
-                    }
-                }) or True
+            # Configure Azure Monitor OpenTelemetry with Live Metrics and Performance Counters
+            configure_azure_monitor(
+                connection_string=app_insights_connection_string,
+                enable_live_metrics=True,  # Enable Live Metrics for real-time monitoring
+                enable_standard_metrics=True,  # Enable performance counters (CPU, memory, request rate, etc.)
+                logger_name=service_name,
+                resource_attributes={
+                    "service.name": service_name,
+                    "service.instance.id": os.getenv('WEBSITE_INSTANCE_ID', 'local')
+                }
             )
             
-            logger.addHandler(azure_handler)
             logger.info(
-                "Application Insights logging enabled",
+                "Application Insights with Live Metrics enabled",
                 extra={'operation_id': 'startup', 'request_path': '/init'}
             )
             
@@ -133,30 +120,18 @@ def configure_logging(
 def get_tracer(
     app_insights_connection_string: Optional[str] = None,
     sample_rate: float = 1.0
-) -> Optional[Tracer]:
+) -> Optional[object]:
     """
-    Get OpenCensus tracer for distributed tracing
+    Get tracer for distributed tracing (deprecated - now handled by configure_azure_monitor)
     
     Args:
         app_insights_connection_string: Application Insights connection string
         sample_rate: Sampling rate (0.0 to 1.0, default 1.0 = 100%)
         
     Returns:
-        Tracer instance or None if not configured
+        None - tracing is automatically configured by configure_azure_monitor
     """
-    if app_insights_connection_string:
-        try:
-            exporter = AzureExporter(
-                connection_string=app_insights_connection_string
-            )
-            tracer = Tracer(
-                exporter=exporter,
-                sampler=ProbabilitySampler(sample_rate)
-            )
-            return tracer
-        except Exception as e:
-            logging.warning(f"Failed to configure tracer: {e}")
-            return None
+    logging.warning("get_tracer is deprecated - tracing is now automatic with configure_azure_monitor")
     return None
 
 

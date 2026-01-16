@@ -155,6 +155,9 @@ resource "azurerm_monitor_metric_alert" "web_app_response_time" {
   tags = local.common_tags
 }
 
+# NOTE: Http5xx and Http4xx metrics are not available for containerized Linux App Services
+# Use Application Insights or Log Analytics queries instead for HTTP error monitoring
+/*
 resource "azurerm_monitor_metric_alert" "web_app_http_5xx" {
   for_each            = var.web_app_ids
   name                = "${var.naming_prefix}-${each.key}-http5xx-alert"
@@ -208,6 +211,7 @@ resource "azurerm_monitor_metric_alert" "web_app_http_4xx" {
 
   tags = local.common_tags
 }
+*/
 
 resource "azurerm_monitor_metric_alert" "web_app_memory" {
   for_each            = var.web_app_ids
@@ -278,7 +282,7 @@ resource "azurerm_monitor_metric_alert" "sql_cpu" {
 
   criteria {
     metric_namespace = "Microsoft.Sql/servers/databases"
-    metric_name      = "cpu_used"
+    metric_name      = "cpu_percent"
     aggregation      = "Average"
     operator         = "GreaterThan"
     threshold        = 80

@@ -26,8 +26,8 @@ module "monitoring_alerts" {
   app_service_plan_id = module.app_service_plan.id
 
   web_app_ids = {
-    api      = module.web_app_api.id
-    frontend = module.web_app_frontend.id
+    api      = module.api_web_app.id
+    frontend = module.frontend_web_app.id
   }
 
   # Conditional resources based on database type

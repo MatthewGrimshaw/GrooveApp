@@ -129,3 +129,15 @@ variable "unauthenticated_action" {
   type        = string
   default     = "RedirectToLoginPage"
 }
+
+variable "allowed_audiences" {
+  description = "List of allowed audiences for JWT token validation"
+  type        = list(string)
+  default     = []
+}
+
+variable "login_parameters" {
+  description = "Login parameters to pass to Azure AD (e.g., resource scope for requesting API tokens)"
+  type        = map(string)
+  default     = {}
+}

@@ -187,10 +187,10 @@ module "api_web_app" {
   app_settings = merge(
     var.api_app_settings,
     {
-      WEBSITES_PORT                              = "8000"
-      FRONTEND_URL                               = "https://${module.naming.app_service.name}-frontend.azurewebsites.net"
-      APPLICATIONINSIGHTS_CONNECTION_STRING      = module.log_analytics.app_insights_connection_string
-      ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
+      WEBSITES_PORT                         = "8000"
+      FRONTEND_URL                          = "https://${module.naming.app_service.name}-frontend.azurewebsites.net"
+      APPLICATIONINSIGHTS_CONNECTION_STRING = module.log_analytics.app_insights_connection_string
+
       # Logging configuration
       LOG_LEVEL = var.log_level # OFF, ERROR, WARNING, INFO/ON, VERBOSE/DEBUG
     },
@@ -222,7 +222,13 @@ module "api_web_app" {
   tenant_id                 = var.enable_authentication ? var.tenant_id : ""
   client_id                 = var.enable_authentication ? module.entra_id[0].api_app_id : ""
   client_secret             = var.enable_authentication ? module.entra_id[0].api_client_secret : ""
-  unauthenticated_action    = "Return401"
+  unauthenticated_action    = "Return401" # Return 401 for unauthenticated API calls (don't redirect)
+  # Accept tokens from both API app (direct access) and frontend app (SSO)
+  allowed_audiences = var.enable_authentication ? [
+    "api://${module.entra_id[0].api_app_id}",
+    module.entra_id[0].frontend_app_id,
+    "api://${module.entra_id[0].frontend_app_id}" # Accept frontend tokens with api:// prefix
+  ] : []
 
   # VNet Integration for Private Endpoint access
   enable_vnet_integration    = var.enable_private_endpoints
@@ -253,9 +259,8 @@ module "frontend_web_app" {
   app_settings = merge(
     var.frontend_app_settings,
     {
-      API_URL                                    = "https://${module.naming.app_service.name}-api.azurewebsites.net"
-      APPLICATIONINSIGHTS_CONNECTION_STRING      = module.log_analytics.app_insights_connection_string
-      ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
+      API_URL                               = "https://${module.naming.app_service.name}-api.azurewebsites.net"
+      APPLICATIONINSIGHTS_CONNECTION_STRING = module.log_analytics.app_insights_connection_string
       # Logging configuration (same as backend)
       LOG_LEVEL = var.log_level # OFF, ERROR, WARNING, INFO, DEBUG
       # Nginx listens on port 8080 (not default 80)
@@ -271,6 +276,14 @@ module "frontend_web_app" {
   tenant_id                 = var.enable_authentication ? var.tenant_id : ""
   client_id                 = var.enable_authentication ? module.entra_id[0].frontend_app_id : ""
   client_secret             = var.enable_authentication ? module.entra_id[0].frontend_client_secret : ""
+  unauthenticated_action    = "RedirectToLoginPage" # Redirect users to Entra ID login
+  allowed_audiences         = var.enable_authentication ? ["api://${module.entra_id[0].frontend_app_id}"] : []
+
+  # Login parameters to request API token during authentication
+  # This allows the frontend to get a token for calling the API
+  login_parameters = var.enable_authentication ? {
+    resource = "api://${module.entra_id[0].api_app_id}" # Request token with API audience
+  } : {}
 
   # VNet Integration for private endpoint access
   enable_vnet_integration    = var.enable_private_endpoints
@@ -311,4 +324,150 @@ resource "azurerm_role_assignment" "frontend_to_acr" {
   scope                = module.container_registry.registry_id
   role_definition_name = "AcrPull"
   principal_id         = module.frontend_web_app.identity_principal_id
+}
+
+# ============================================================================
+# DATABASE USER CREATION FOR MANAGED IDENTITIES
+# ============================================================================
+
+# Wait for staging slot identities to propagate to Entra ID
+resource "time_sleep" "wait_for_slot_identity_propagation" {
+  count = can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku)) ? 1 : 0
+
+  create_duration = "60s"
+
+  depends_on = [
+    module.api_web_app,
+    module.frontend_web_app
+  ]
+}
+
+# Grant API production slot database access
+resource "null_resource" "grant_api_db_access" {
+  count = var.database_type == "sql" ? 1 : 0
+
+  triggers = {
+    app_principal_id = module.api_web_app.identity_principal_id
+    database_id      = module.database_sql[0].database_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      $token = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
+      $sql = @"
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '${module.api_web_app.name}')
+BEGIN
+    CREATE USER [${module.api_web_app.name}] FROM EXTERNAL PROVIDER;
+END
+ALTER ROLE db_datareader ADD MEMBER [${module.api_web_app.name}];
+ALTER ROLE db_datawriter ADD MEMBER [${module.api_web_app.name}];
+GRANT EXECUTE TO [${module.api_web_app.name}];
+"@
+      Invoke-Sqlcmd -ServerInstance "${module.database_sql[0].server_fqdn}" -Database "${module.database_sql[0].database_name}" -AccessToken $token -Query $sql
+    EOT
+
+    interpreter = ["pwsh", "-Command"]
+  }
+
+  depends_on = [
+    module.api_web_app,
+    module.database_sql
+  ]
+}
+
+# Grant API staging slot database access
+resource "null_resource" "grant_api_staging_db_access" {
+  count = var.database_type == "sql" && can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku)) ? 1 : 0
+
+  triggers = {
+    slot_principal_id = module.api_web_app.staging_slot_principal_id
+    database_id       = module.database_sql[0].database_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      $token = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
+      $sql = @"
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '${module.api_web_app.name}/slots/staging')
+BEGIN
+    CREATE USER [${module.api_web_app.name}/slots/staging] FROM EXTERNAL PROVIDER;
+END
+ALTER ROLE db_datareader ADD MEMBER [${module.api_web_app.name}/slots/staging];
+ALTER ROLE db_datawriter ADD MEMBER [${module.api_web_app.name}/slots/staging];
+GRANT EXECUTE TO [${module.api_web_app.name}/slots/staging];
+"@
+      Invoke-Sqlcmd -ServerInstance "${module.database_sql[0].server_fqdn}" -Database "${module.database_sql[0].database_name}" -AccessToken $token -Query $sql
+    EOT
+
+    interpreter = ["pwsh", "-Command"]
+  }
+
+  depends_on = [
+    module.api_web_app,
+    module.database_sql,
+    time_sleep.wait_for_slot_identity_propagation
+  ]
+}
+
+# Grant Frontend production slot database access (if needed for future features)
+resource "null_resource" "grant_frontend_db_access" {
+  count = var.database_type == "sql" ? 1 : 0
+
+  triggers = {
+    app_principal_id = module.frontend_web_app.identity_principal_id
+    database_id      = module.database_sql[0].database_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      $token = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
+      $sql = @"
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '${module.frontend_web_app.name}')
+BEGIN
+    CREATE USER [${module.frontend_web_app.name}] FROM EXTERNAL PROVIDER;
+END
+ALTER ROLE db_datareader ADD MEMBER [${module.frontend_web_app.name}];
+"@
+      Invoke-Sqlcmd -ServerInstance "${module.database_sql[0].server_fqdn}" -Database "${module.database_sql[0].database_name}" -AccessToken $token -Query $sql
+    EOT
+
+    interpreter = ["pwsh", "-Command"]
+  }
+
+  depends_on = [
+    module.frontend_web_app,
+    module.database_sql
+  ]
+}
+
+# Grant Frontend staging slot database access (if needed for future features)
+resource "null_resource" "grant_frontend_staging_db_access" {
+  count = var.database_type == "sql" && can(regex("^(S[1-9]|P[1-9]V[2-3])", var.app_service_plan_sku)) ? 1 : 0
+
+  triggers = {
+    slot_principal_id = module.frontend_web_app.staging_slot_principal_id
+    database_id       = module.database_sql[0].database_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      $token = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
+      $sql = @"
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '${module.frontend_web_app.name}/slots/staging')
+BEGIN
+    CREATE USER [${module.frontend_web_app.name}/slots/staging] FROM EXTERNAL PROVIDER;
+END
+ALTER ROLE db_datareader ADD MEMBER [${module.frontend_web_app.name}/slots/staging];
+"@
+      Invoke-Sqlcmd -ServerInstance "${module.database_sql[0].server_fqdn}" -Database "${module.database_sql[0].database_name}" -AccessToken $token -Query $sql
+    EOT
+
+    interpreter = ["pwsh", "-Command"]
+  }
+
+  depends_on = [
+    module.frontend_web_app,
+    module.database_sql,
+    time_sleep.wait_for_slot_identity_propagation
+  ]
 }

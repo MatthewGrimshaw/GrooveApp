@@ -18,10 +18,10 @@ output "alert_ids" {
     { for k, v in azurerm_monitor_metric_alert.app_service_plan_memory : "asp_memory_${k}" => v.id },
     { for k, v in azurerm_monitor_metric_alert.app_service_plan_http_queue : "asp_http_queue_${k}" => v.id },
 
-    # Web App alerts
+    # Web App alerts (HTTP 4xx/5xx commented out - not available for containerized apps)
     { for k, v in azurerm_monitor_metric_alert.web_app_response_time : "webapp_response_${k}" => v.id },
-    { for k, v in azurerm_monitor_metric_alert.web_app_http_5xx : "webapp_5xx_${k}" => v.id },
-    { for k, v in azurerm_monitor_metric_alert.web_app_http_4xx : "webapp_4xx_${k}" => v.id },
+    # { for k, v in azurerm_monitor_metric_alert.web_app_http_5xx : "webapp_5xx_${k}" => v.id },
+    # { for k, v in azurerm_monitor_metric_alert.web_app_http_4xx : "webapp_4xx_${k}" => v.id },
     { for k, v in azurerm_monitor_metric_alert.web_app_memory : "webapp_memory_${k}" => v.id },
     { for k, v in azurerm_monitor_metric_alert.web_app_cpu_time : "webapp_cpu_${k}" => v.id },
 
@@ -48,8 +48,8 @@ output "alert_count" {
     length(azurerm_monitor_metric_alert.app_service_plan_memory) +
     length(azurerm_monitor_metric_alert.app_service_plan_http_queue) +
     length(azurerm_monitor_metric_alert.web_app_response_time) +
-    length(azurerm_monitor_metric_alert.web_app_http_5xx) +
-    length(azurerm_monitor_metric_alert.web_app_http_4xx) +
+    # length(azurerm_monitor_metric_alert.web_app_http_5xx) +
+    # length(azurerm_monitor_metric_alert.web_app_http_4xx) +
     length(azurerm_monitor_metric_alert.web_app_memory) +
     length(azurerm_monitor_metric_alert.web_app_cpu_time) +
     length(azurerm_monitor_metric_alert.sql_cpu) +
