@@ -285,7 +285,7 @@ it('should redirect unauthenticated users', () => {
 ### Writing Secure Code
 ```python
 # ❌ BAD - Secret in code
-api_key = "sk-1234567890abcdef"
+api_key = "your-secret-key-here"
 
 # ✅ GOOD - Use environment variables
 api_key = os.environ.get("API_KEY")

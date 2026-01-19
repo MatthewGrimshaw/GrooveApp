@@ -9,6 +9,45 @@
 
 The app generates scales, arpeggios, intervals, and jazz chord extensions with correct enharmonic spelling following music theory conventions.
 
+## Critical File Organization Rules
+
+### ⚠️ Documentation Must Be in `/docs/` Folder
+
+**ALL documentation files (`.md`) MUST be created in the `/docs/` directory.**
+
+This is a **STRICT, NON-NEGOTIABLE** rule that MUST be followed for:
+- ✅ Architecture documentation
+- ✅ API documentation
+- ✅ Deployment guides
+- ✅ Troubleshooting guides
+- ✅ Developer guides
+- ✅ CI/CD documentation
+- ✅ Feature documentation
+- ✅ Any other markdown documentation
+
+**NEVER create documentation files in:**
+- ❌ `.github/workflows/` - Only for GitHub Actions workflow YAML files
+- ❌ Root directory - Keep root clean (only README.md allowed)
+- ❌ Code directories (`/api`, `/app`, `/infra`) - Only code-related files
+
+**Correct placement:**
+```
+docs/
+├── API_LOGGING.md
+├── AUTHENTICATION.md
+├── CI-CD-README.md
+├── DEPLOYMENT.md
+├── DEVELOPER-GUIDE.md
+├── TROUBLESHOOTING.md
+└── ... (all other .md files)
+```
+
+**Why this matters:**
+- 🎯 Single location for all documentation
+- 📁 Clean repository structure
+- 🔍 Easy to find and maintain documentation
+- 🚫 Prevents scattered documentation files
+
 ## Architecture Rules
 
 ### Component Responsibilities
@@ -391,6 +430,168 @@ npm update <package>
 - Use environment variables for SQL_SERVER, SQL_DATABASE
 - Use .env files for local development (excluded from Git)
 
+## Security & Secrets Management
+
+### ⚠️ CRITICAL: No Secrets in Repository
+
+**NEVER commit secrets, credentials, or sensitive data to the repository.**
+
+This is a **STRICT, NON-NEGOTIABLE** security rule that applies to:
+- ❌ API keys, tokens, passwords
+- ❌ Connection strings with credentials
+- ❌ Private keys, certificates
+- ❌ OAuth client secrets
+- ❌ Database passwords
+- ❌ Azure subscription IDs or tenant IDs (unless public)
+- ❌ GitHub Personal Access Tokens (PATs)
+- ❌ Service principal credentials
+- ❌ Storage account keys
+- ❌ Any other authentication credentials
+
+### Approved Secrets Storage
+
+**Production & Staging Environments:**
+- ✅ **GitHub Secrets**: Repository and environment secrets for CI/CD
+- ✅ **Azure Key Vault**: Runtime secrets accessed via Managed Identity
+- ✅ **Managed Identities**: Passwordless authentication to Azure resources
+- ✅ **Azure App Service Configuration**: Environment-specific app settings
+
+**Local Development:**
+- ✅ **`.env` files**: For local environment variables (MUST be in `.gitignore`)
+- ✅ **PowerShell environment variables**: `$env:VARIABLE_NAME`
+- ✅ **User-specific configuration files**: Listed in `.gitignore`
+
+### Secret Detection & Prevention
+
+**All code changes are automatically scanned for secrets:**
+- 🔍 **TruffleHog**: Detects verified secrets from 700+ sources
+- 🔍 **GitLeaks**: Scans for patterns matching API keys, tokens, credentials
+- 🚫 CI/CD pipeline **FAILS** if secrets are detected
+- 🔒 Secrets are redacted in scan results
+
+**If you accidentally commit a secret:**
+1. **IMMEDIATELY** revoke/rotate the compromised secret
+2. Remove from Git history using `git filter-repo` or BFG Repo-Cleaner
+3. Force push to remote (coordinate with team)
+4. Update all environments with new secret
+5. Review audit logs for unauthorized access
+
+### Code Examples
+
+```python
+# ❌ WRONG - Secret hardcoded in code
+connection_string = "Server=myserver.database.windows.net;Database=mydb;User=admin;Password=MyP@ssw0rd123"
+
+# ✅ CORRECT - Use environment variables
+connection_string = os.environ.get("SQL_CONNECTION_STRING")
+
+# ❌ WRONG - API key in source code
+api_key = "your-secret-api-key-12345"
+
+# ✅ CORRECT - Load from environment
+api_key = os.environ.get("API_KEY")
+```
+
+```typescript
+// ❌ WRONG - Hardcoded token
+const authToken = 'ghp_1234567890abcdefghijklmnopqrstuvwxyz';
+
+// ✅ CORRECT - Use environment configuration
+const apiUrl = environment.apiUrl; // Loaded from environment.ts
+```
+
+```powershell
+# ❌ WRONG - PAT in script
+$githubPat = "github_pat_11AGQJA6Y0gBWFNG..."
+
+# ✅ CORRECT - Read from secure parameter or environment
+param(
+    [Parameter(Mandatory = $true)]
+    [SecureString] $GithubPat
+)
+
+# Or from environment variable
+$githubPat = $env:GITHUB_PAT
+```
+
+### Documentation & Examples
+
+When writing documentation or examples:
+- ✅ Use obvious placeholders: `"your-api-key-here"`, `"<YOUR_SECRET>"`, `"REPLACE_WITH_YOUR_KEY"`
+- ✅ Use example values: `"example-key-12345"`, `"00000000-0000-0000-0000-000000000000"`
+- ❌ Don't use realistic-looking secrets that trigger scanners
+- ❌ Don't use patterns like `sk-...`, `ghp_...`, etc. in examples
+
+### Environment Variables Best Practices
+
+**Naming Convention:**
+```powershell
+# Use UPPER_SNAKE_CASE for environment variables
+$env:SQL_SERVER = "grooveapp-db.database.windows.net"
+$env:SQL_DATABASE = "grooveapp-staging"
+$env:AZURE_CLIENT_ID = "12345678-1234-1234-1234-123456789abc"
+```
+
+**Local .env files (MUST be in .gitignore):**
+```bash
+# .env file for local development only
+SQL_SERVER=localhost
+SQL_DATABASE=grooveapp_dev
+API_KEY=local-development-key
+```
+
+**Azure App Service Configuration:**
+- Set application settings in Azure Portal or via Azure CLI
+- Use deployment slots for environment-specific configurations
+- Enable "Deployment slot setting" for slot-specific values
+
+### GitHub Actions Secrets
+
+**Repository-level secrets** (shared across all environments):
+- `AZURE_CLIENT_ID` - Service principal client ID for OIDC auth
+- `AZURE_TENANT_ID` - Azure tenant ID
+
+**Environment-level secrets** (specific to Staging/Production):
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_STORAGE_ACCOUNT_NAME`
+- `AZURE_STORAGE_CONTAINER_NAME`
+- `AZURE_RESOURCE_GROUP_NAME`
+- `AZURE_KEY_VAULT_NAME`
+
+**Access in workflows:**
+```yaml
+- name: Example using secrets
+  env:
+    TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  run: |
+    echo "Authenticating to Azure..."
+```
+
+### Key Vault Integration
+
+**Accessing secrets at runtime:**
+```python
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+# Use Managed Identity - no credentials needed
+credential = DefaultAzureCredential()
+client = SecretClient(vault_url="https://kv-grooveapp.vault.azure.net/", credential=credential)
+
+# Retrieve secret
+db_password = client.get_secret("database-password").value
+```
+
+**Never log or expose secrets:**
+```python
+# ❌ WRONG - Logs sensitive data
+logger.info(f"Connection string: {connection_string}")
+
+# ✅ CORRECT - Log without exposing secrets
+logger.info("Database connection established")
+```
+
 ## Testing Guidelines
 
 ### API Testing
@@ -519,12 +720,17 @@ TypeScript Interface → Angular Template → DOM Rendering
 
 ❌ Creating alternative build scripts (`build-v2.ps1`)
 ❌ Creating alternative test scripts (`quick-test.ps1`)
+❌ Creating documentation files outside of `/docs/` folder
+❌ Creating `.md` files in `.github/workflows/` directory
 ❌ Implementing music theory logic in Angular
-❌ Hardcoding credentials or connection strings
+❌ Hardcoding credentials, secrets, or connection strings
+❌ Committing API keys, tokens, or passwords to Git
+❌ Using realistic secret patterns in documentation examples
 ❌ Removing CVE scanning from build scripts
 ❌ Using cursors instead of set-based SQL
 ❌ Direct DOM manipulation in Angular
 ❌ Synchronous HTTP calls (use Observables)
+❌ Logging sensitive data (passwords, tokens, connection strings)
 
 ## When in Doubt
 

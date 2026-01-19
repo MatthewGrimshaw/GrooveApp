@@ -2,6 +2,7 @@
 GrooveApp Music Theory API
 FastAPI application for querying music theory data from Azure SQL Database
 """
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -19,14 +20,19 @@ from logging_config import configure_logging, create_audit_log
 from logging_middleware import RequestLoggingMiddleware, DatabaseLoggingMiddleware
 
 # Initialize logger
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')  # OFF, ERROR, WARNING, INFO/ON, VERBOSE/DEBUG
-APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv('APPLICATIONINSIGHTS_CONNECTION_STRING')
+LOG_LEVEL = os.getenv(
+    "LOG_LEVEL", "INFO"
+)  # OFF, ERROR, WARNING, INFO/ON, VERBOSE/DEBUG
+APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv(
+    "APPLICATIONINSIGHTS_CONNECTION_STRING"
+)
 
 logger = configure_logging(
     app_insights_connection_string=APPLICATIONINSIGHTS_CONNECTION_STRING,
     log_level=LOG_LEVEL,
-    service_name='grooveapp-api'
+    service_name="grooveapp-api",
 )
+
 
 # Helper function to fix Unicode decoding issues with pyodbc
 def fix_unicode(s):
@@ -40,22 +46,23 @@ def fix_unicode(s):
         # - flat symbol ♭ (U+266D)
         # - sharp symbol # (ASCII 0x23) or ♯ (U+266F)
         # - degree symbol ° (U+00B0)
-        
+
         # Replace malformed character with flat symbol
-        if '?' in s and len(s) > 1:
+        if "?" in s and len(s) > 1:
             # Likely a roman numeral with flat: ?II, ?III, ?V, ?VI, ?VII
-            return s.replace('?', '♭')
-        
+            return s.replace("?", "♭")
+
         # Fix corrupted degree symbol: The database stores UTF-8 bytes (C2 B0) as Latin-1 characters
         # When read back, C2 appears as 'Â' and B0 as '°', resulting in 'Â°'
         # Replace 'Â°' with proper degree symbol '°'
-        if 'Â°' in s:
-            s = s.replace('Â°', '°')
-        
+        if "Â°" in s:
+            s = s.replace("Â°", "°")
+
         # Note: Sharp (#) is standard ASCII and should not need fixing
         # But we'll ensure it's preserved
         return s
     return s
+
 
 # Models
 class Note(BaseModel):
@@ -67,6 +74,7 @@ class Note(BaseModel):
     IsSharp: bool
     IsFlat: bool
 
+
 class ScaleNote(BaseModel):
     DegreeNumber: int
     ScaleDegree: Optional[str]
@@ -76,11 +84,13 @@ class ScaleNote(BaseModel):
     RomanNumeral: Optional[str]
     ScaleName: str
 
+
 class ScaleType(BaseModel):
     ScaleTypeId: int
     ScaleName: str
     IntervalPattern: str
     Description: Optional[str]
+
 
 class ChordType(BaseModel):
     ChordTypeId: int
@@ -88,6 +98,7 @@ class ChordType(BaseModel):
     ChordSymbol: str
     IntervalPattern: str
     Description: Optional[str]
+
 
 class ArpeggioNote(BaseModel):
     NotePosition: int
@@ -100,6 +111,7 @@ class ArpeggioNote(BaseModel):
     ChordSymbol: str
     FullChordSymbol: str
 
+
 class Interval(BaseModel):
     IntervalId: int
     IntervalName: str
@@ -107,6 +119,7 @@ class Interval(BaseModel):
     ShortName: str
     RomanNumeral: str
     Description: Optional[str]
+
 
 class ChordExtension(BaseModel):
     ExtensionId: int
@@ -119,12 +132,14 @@ class ChordExtension(BaseModel):
     DisplayOrder: int
     Note: Optional[str] = None
 
+
 class NoteInterval(BaseModel):
     FromNote: str
     ToNote: str
     Semitones: int
     IntervalName: Optional[str]
     IntervalShortName: Optional[str]
+
 
 class CircleOfFifthsKey(BaseModel):
     KeySignatureId: int
@@ -138,6 +153,7 @@ class CircleOfFifthsKey(BaseModel):
     CirclePosition: int
     RelativeKey: Optional[str]
 
+
 class DiatonicChord(BaseModel):
     ProgressionId: int
     KeyNote: str
@@ -150,11 +166,12 @@ class DiatonicChord(BaseModel):
     IntervalFromTonic: int
     Description: Optional[str]
 
+
 # FastAPI app
 app = FastAPI(
     title="GrooveApp Music Theory API",
     description="REST API for music theory queries including scales, chords, and intervals",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Add request logging middleware
@@ -166,7 +183,9 @@ allowed_origins = [
     "http://localhost:8080",
     "http://localhost:4200",
     "http://host.docker.internal:8080",  # Docker container accessing host
-    os.environ.get("FRONTEND_URL", "https://webapp-grooveapp-frontend.azurewebsites.net")
+    os.environ.get(
+        "FRONTEND_URL", "https://webapp-grooveapp-frontend.azurewebsites.net"
+    ),
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -179,48 +198,54 @@ app.add_middleware(
 logger.info(
     "API startup complete",
     extra={
-        'operation_id': 'startup',
-        'request_path': '/startup',
-        'log_level': LOG_LEVEL,
-        'app_insights_enabled': bool(APPLICATIONINSIGHTS_CONNECTION_STRING)
-    }
+        "operation_id": "startup",
+        "request_path": "/startup",
+        "log_level": LOG_LEVEL,
+        "app_insights_enabled": bool(APPLICATIONINSIGHTS_CONNECTION_STRING),
+    },
 )
+
 
 # Database connection
 def get_access_token():
     """Get access token using ManagedIdentityCredential (Azure) or DefaultAzureCredential (local)"""
     import base64
     import json
-    
+
     # Check for environment variable first (explicit token for local Docker testing)
-    token = os.environ.get('AZURE_ACCESS_TOKEN')
+    token = os.environ.get("AZURE_ACCESS_TOKEN")
     if token:
         logger.info("Using AZURE_ACCESS_TOKEN environment variable")
         return token
-    
+
     try:
         # Try ManagedIdentityCredential first (best for Azure App Service)
         from azure.identity import ManagedIdentityCredential
+
         credential = ManagedIdentityCredential()
         token_obj = credential.get_token("https://database.windows.net/.default")
-        
+
         # Decode token to see which principal it's for (for debugging)
         try:
             # JWT tokens have 3 parts: header.payload.signature
-            token_parts = token_obj.token.split('.')
+            token_parts = token_obj.token.split(".")
             if len(token_parts) >= 2:
                 # Decode payload (add padding if needed)
                 payload = token_parts[1]
                 padding = 4 - len(payload) % 4
                 if padding != 4:
-                    payload += '=' * padding
+                    payload += "=" * padding
                 decoded = base64.urlsafe_b64decode(payload)
                 token_info = json.loads(decoded)
-                principal_name = token_info.get('appid', token_info.get('oid', 'unknown'))
-                logger.info(f"Acquired token for principal: {token_info.get('app_displayname', principal_name)} (oid: {token_info.get('oid', 'N/A')})")
+                principal_name = token_info.get(
+                    "appid", token_info.get("oid", "unknown")
+                )
+                logger.info(
+                    f"Acquired token for principal: {token_info.get('app_displayname', principal_name)} (oid: {token_info.get('oid', 'N/A')})"
+                )
         except Exception as decode_error:
             logger.warning(f"Could not decode token for debugging: {decode_error}")
-        
+
         return token_obj.token
     except Exception as managed_identity_error:
         logger.warning(f"ManagedIdentityCredential failed: {managed_identity_error}")
@@ -240,41 +265,46 @@ def get_access_token():
                 f"For local development: Run 'az login' or set AZURE_ACCESS_TOKEN environment variable."
             )
 
+
 def get_db_connection(timeout_seconds=30):
     """Create database connection using Entra ID authentication
-    
+
     Args:
         timeout_seconds: Connection timeout in seconds (default: 30)
     """
-    server = os.environ.get('SQL_SERVER')
-    database = os.environ.get('SQL_DATABASE')
-    
+    server = os.environ.get("SQL_SERVER")
+    database = os.environ.get("SQL_DATABASE")
+
     if not server or not database:
-        raise ValueError("SQL_SERVER and SQL_DATABASE environment variables must be set")
-    
+        raise ValueError(
+            "SQL_SERVER and SQL_DATABASE environment variables must be set"
+        )
+
     try:
         # Get access token
         access_token = get_access_token()
-        
+
         # Encode token for SQL Server
-        token_bytes = access_token.encode('UTF-16-LE')
-        token_struct = struct.pack(f'<I{len(token_bytes)}s', len(token_bytes), token_bytes)
-        
+        token_bytes = access_token.encode("UTF-16-LE")
+        token_struct = struct.pack(
+            f"<I{len(token_bytes)}s", len(token_bytes), token_bytes
+        )
+
         # Connect using ODBC Driver 18 with access token attribute
         try:
-            driver = 'ODBC Driver 18 for SQL Server'
-            conn_str = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes;Connection Timeout={timeout_seconds}'
+            driver = "ODBC Driver 18 for SQL Server"
+            conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Encrypt=yes;Connection Timeout={timeout_seconds}"
             # SQL_COPT_SS_ACCESS_TOKEN = 1256
             conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
             return conn
         except pyodbc.Error as e:
-            error_code = e.args[0] if e.args else 'Unknown'
+            error_code = e.args[0] if e.args else "Unknown"
             error_msg = e.args[1] if len(e.args) > 1 else str(e)
-            
+
             # Provide helpful error messages for common issues
-            if error_code == '28000' and 'Login failed' in error_msg:
+            if error_code == "28000" and "Login failed" in error_msg:
                 # Determine if it's a token expiration or permission issue
-                if 'Token is expired' in error_msg:
+                if "Token is expired" in error_msg:
                     raise Exception(
                         f"Database authentication failed: {error_msg}\n\n"
                         "The Azure AD access token has expired.\n\n"
@@ -287,24 +317,31 @@ def get_db_connection(timeout_seconds=30):
                     principal_info = "the web app's managed identity"
                     try:
                         import base64, json
-                        token_parts = access_token.split('.')
+
+                        token_parts = access_token.split(".")
                         if len(token_parts) >= 2:
                             payload = token_parts[1]
                             padding = 4 - len(payload) % 4
                             if padding != 4:
-                                payload += '=' * padding
+                                payload += "=" * padding
                             decoded = base64.urlsafe_b64decode(payload)
                             token_info = json.loads(decoded)
                             # Check if it's a user token or service principal token
-                            if token_info.get('upn'):  # User Principal Name = user token
+                            if token_info.get(
+                                "upn"
+                            ):  # User Principal Name = user token
                                 principal_info = f"user {token_info.get('upn')}"
-                            elif token_info.get('app_displayname'):  # App display name = managed identity
+                            elif token_info.get(
+                                "app_displayname"
+                            ):  # App display name = managed identity
                                 principal_info = f"managed identity '{token_info.get('app_displayname')}'"
-                            elif token_info.get('oid'):
-                                principal_info = f"principal (OID: {token_info.get('oid')})"
+                            elif token_info.get("oid"):
+                                principal_info = (
+                                    f"principal (OID: {token_info.get('oid')})"
+                                )
                     except Exception:
                         pass  # Use default principal_info
-                    
+
                     raise Exception(
                         f"Database authentication failed for {principal_info}: {error_msg}\n\n"
                         "The database principal doesn't have permission to access this database.\n\n"
@@ -317,10 +354,15 @@ def get_db_connection(timeout_seconds=30):
                         "   - Run: sqlcmd -S {server} -d {database} -G -i infra/setup-music-tables.sql"
                     )
             else:
-                raise Exception(f"Database connection failed ({error_code}): {error_msg}")
-            
+                raise Exception(
+                    f"Database connection failed ({error_code}): {error_msg}"
+                )
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Database connection failed: {str(e)}"
+        )
+
 
 # Health check
 @app.get("/", tags=["Health"])
@@ -329,90 +371,95 @@ async def root(request: Request):
     logger.info(
         "Root endpoint accessed",
         extra={
-            'operation_id': getattr(request.state, 'operation_id', 'N/A'),
-            'user_id': getattr(request.state, 'user_id', 'anonymous'),
-            'request_path': '/'
-        }
+            "operation_id": getattr(request.state, "operation_id", "N/A"),
+            "user_id": getattr(request.state, "user_id", "anonymous"),
+            "request_path": "/",
+        },
     )
     return {
         "status": "healthy",
         "service": "GrooveApp Music Theory API",
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
+
 
 @app.get("/health", tags=["Health"])
 async def health_check(request: Request):
     """Comprehensive health check with detailed diagnostics"""
     import time
     from datetime import datetime, timedelta
-    
+
     start_time = time.time()
-    operation_id = getattr(request.state, 'operation_id', 'N/A')
-    
+    operation_id = getattr(request.state, "operation_id", "N/A")
+
     health_response = {
         "status": "healthy",
         "database": "connected",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "responseTimeMs": 0,
-        "checks": {}
+        "checks": {},
     }
-    
+
     # Database connectivity check with retry logic
     db_healthy = False
     db_error_msg = None
     max_retries = 3
     retry_delay = 1  # Start with 1 second
     db_timeout = 10  # 10 second timeout per attempt
-    
+
     for attempt in range(max_retries):
         try:
             db_start = time.time()
-            
-            with DatabaseLoggingMiddleware(logger, f"Health check DB connection (attempt {attempt + 1}/{max_retries})", request):
+
+            with DatabaseLoggingMiddleware(
+                logger,
+                f"Health check DB connection (attempt {attempt + 1}/{max_retries})",
+                request,
+            ):
                 conn = get_db_connection(timeout_seconds=db_timeout)
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
                 cursor.close()
                 conn.close()
-                
+
             db_time = (time.time() - db_start) * 1000
-            
+
             health_response["checks"]["database"] = {
                 "status": "healthy",
                 "responseTimeMs": round(db_time, 2),
-                "attempts": attempt + 1
+                "attempts": attempt + 1,
             }
-            
+
             db_healthy = True
-            
+
             logger.debug(
                 "Health check database check passed",
                 extra={
-                    'operation_id': operation_id,
-                    'user_id': 'system',
-                    'request_path': '/health',
-                    'duration_ms': round(db_time, 2),
-                    'attempts': attempt + 1
-                }
+                    "operation_id": operation_id,
+                    "user_id": "system",
+                    "request_path": "/health",
+                    "duration_ms": round(db_time, 2),
+                    "attempts": attempt + 1,
+                },
             )
             break  # Success, exit retry loop
-            
+
         except Exception as e:
             db_error_msg = str(e)
-            
+
             # Check if this is a timeout error (likely VNet integration not ready)
-            is_timeout = 'timeout' in str(e).lower() or 'HYT00' in str(e)
-            
+            is_timeout = "timeout" in str(e).lower() or "HYT00" in str(e)
+
             if attempt < max_retries - 1 and is_timeout:
                 logger.warning(
                     f"Health check database connection attempt {attempt + 1} failed (timeout), retrying in {retry_delay}s",
                     extra={
-                        'operation_id': operation_id,
-                        'user_id': 'system',
-                        'request_path': '/health',
-                        'error': str(e),
-                        'attempt': attempt + 1
-                    }
+                        "operation_id": operation_id,
+                        "user_id": "system",
+                        "request_path": "/health",
+                        "error": str(e),
+                        "attempt": attempt + 1,
+                    },
                 )
                 time.sleep(retry_delay)
                 retry_delay *= 2  # Exponential backoff
@@ -420,69 +467,77 @@ async def health_check(request: Request):
                 logger.error(
                     f"Health check database connection failed after {attempt + 1} attempts: {str(e)}",
                     extra={
-                        'operation_id': operation_id,
-                        'user_id': 'system',
-                        'request_path': '/health',
-                        'error': str(e),
-                        'attempts': attempt + 1
+                        "operation_id": operation_id,
+                        "user_id": "system",
+                        "request_path": "/health",
+                        "error": str(e),
+                        "attempts": attempt + 1,
                     },
-                    exc_info=(attempt == max_retries - 1)  # Only log full stack trace on final attempt
+                    exc_info=(
+                        attempt == max_retries - 1
+                    ),  # Only log full stack trace on final attempt
                 )
                 break
-    
+
     # Handle database check failure - mark as degraded but still return 200 OK
     # This allows the app to be considered healthy during startup while VNet integration establishes
     if not db_healthy:
-        health_response["status"] = "degraded"  # Changed from "unhealthy" to allow startup
+        health_response["status"] = (
+            "degraded"  # Changed from "unhealthy" to allow startup
+        )
         health_response["database"] = "disconnected"
         health_response["checks"]["database"] = {
             "status": "unhealthy",
             "error": db_error_msg,
             "attempts": max_retries,
-            "note": "Database may be unreachable during VNet integration setup. Service will retry."
+            "note": "Database may be unreachable during VNet integration setup. Service will retry.",
         }
-    
+
     # Azure token check
     try:
-        token = os.environ.get('AZURE_ACCESS_TOKEN')
+        token = os.environ.get("AZURE_ACCESS_TOKEN")
         if token:
             health_response["checks"]["authentication"] = {
                 "status": "healthy",
                 "method": "environment_token",
-                "note": "Token expiration monitoring not available with environment variable"
+                "note": "Token expiration monitoring not available with environment variable",
             }
         else:
             # Try to get token expiry from DefaultAzureCredential
             try:
                 from azure.identity import DefaultAzureCredential
+
                 credential = DefaultAzureCredential()
-                token_obj = credential.get_token("https://database.windows.net/.default")
+                token_obj = credential.get_token(
+                    "https://database.windows.net/.default"
+                )
                 # Token objects don't expose expiry directly, but tokens typically last 1 hour
                 health_response["checks"]["authentication"] = {
                     "status": "healthy",
                     "method": "managed_identity",
-                    "note": "Azure AD token obtained successfully"
+                    "note": "Azure AD token obtained successfully",
                 }
             except Exception as auth_error:
                 health_response["checks"]["authentication"] = {
                     "status": "warning",
                     "method": "unknown",
-                    "error": str(auth_error)
+                    "error": str(auth_error),
                 }
     except Exception as e:
         health_response["checks"]["authentication"] = {
             "status": "warning",
-            "error": str(e)
+            "error": str(e),
         }
-    
+
     # Calculate total response time
     health_response["responseTimeMs"] = round((time.time() - start_time) * 1000, 2)
-    
+
     # Return appropriate status code
     if health_response["status"] == "unhealthy":
         raise HTTPException(status_code=503, detail=health_response)
-    
+
     return health_response
+
 
 # Notes endpoints
 @app.get("/notes", response_model=List[Note], tags=["Notes"])
@@ -492,24 +547,27 @@ async def get_notes():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM dbo.Notes ORDER BY SemitonesFromC")
-        
+
         notes = []
         for row in cursor.fetchall():
-            notes.append(Note(
-                NoteId=row[0],
-                NoteName=row[1],
-                EnharmonicEquivalent=row[2],
-                SemitonesFromC=row[3],
-                IsNatural=bool(row[4]),
-                IsSharp=bool(row[5]),
-                IsFlat=bool(row[6])
-            ))
-        
+            notes.append(
+                Note(
+                    NoteId=row[0],
+                    NoteName=row[1],
+                    EnharmonicEquivalent=row[2],
+                    SemitonesFromC=row[3],
+                    IsNatural=bool(row[4]),
+                    IsSharp=bool(row[5]),
+                    IsFlat=bool(row[6]),
+                )
+            )
+
         cursor.close()
         conn.close()
         return notes
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Intervals endpoints
 @app.get("/intervals", response_model=List[Interval], tags=["Intervals"])
@@ -519,51 +577,62 @@ async def get_intervals():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM dbo.Intervals ORDER BY Semitones")
-        
+
         intervals = []
         for row in cursor.fetchall():
-            intervals.append(Interval(
-                IntervalId=row[0],
-                IntervalName=row[1],
-                Semitones=row[2],
-                ShortName=row[3],
-                RomanNumeral=fix_unicode(row[4]),
-                Description=row[5]
-            ))
-        
+            intervals.append(
+                Interval(
+                    IntervalId=row[0],
+                    IntervalName=row[1],
+                    Semitones=row[2],
+                    ShortName=row[3],
+                    RomanNumeral=fix_unicode(row[4]),
+                    Description=row[5],
+                )
+            )
+
         cursor.close()
         conn.close()
         return intervals
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/intervals/{from_note}", response_model=List[NoteInterval], tags=["Intervals"])
+
+@app.get(
+    "/intervals/{from_note}", response_model=List[NoteInterval], tags=["Intervals"]
+)
 async def get_intervals_from_note(from_note: str):
     """Get all intervals from a specific note"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT * FROM dbo.vw_NoteIntervals 
             WHERE FromNote = ? 
             ORDER BY Semitones
-        """, from_note)
-        
+        """,
+            from_note,
+        )
+
         intervals = []
         for row in cursor.fetchall():
-            intervals.append(NoteInterval(
-                FromNote=row[0],
-                ToNote=row[1],
-                Semitones=row[2],
-                IntervalName=row[3],
-                IntervalShortName=row[4]
-            ))
-        
+            intervals.append(
+                NoteInterval(
+                    FromNote=row[0],
+                    ToNote=row[1],
+                    Semitones=row[2],
+                    IntervalName=row[3],
+                    IntervalShortName=row[4],
+                )
+            )
+
         cursor.close()
         conn.close()
         return intervals
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Scale endpoints
 @app.get("/scales", response_model=List[ScaleType], tags=["Scales"])
@@ -573,26 +642,33 @@ async def get_scale_types():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM dbo.ScaleTypes ORDER BY ScaleTypeId")
-        
+
         scales = []
         for row in cursor.fetchall():
-            scales.append(ScaleType(
-                ScaleTypeId=row[0],
-                ScaleName=row[1],
-                IntervalPattern=row[2],
-                Description=row[3]
-            ))
-        
+            scales.append(
+                ScaleType(
+                    ScaleTypeId=row[0],
+                    ScaleName=row[1],
+                    IntervalPattern=row[2],
+                    Description=row[3],
+                )
+            )
+
         cursor.close()
         conn.close()
         return scales
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/scales/{root_note}/{scale_type_id}", response_model=List[ScaleNote], tags=["Scales"])
+
+@app.get(
+    "/scales/{root_note}/{scale_type_id}",
+    response_model=List[ScaleNote],
+    tags=["Scales"],
+)
 async def generate_scale(root_note: str, scale_type_id: int):
     """Generate a scale from a root note and scale type
-    
+
     Examples:
     - /scales/C/1 - C Major
     - /scales/A/2 - A Natural Minor
@@ -602,31 +678,39 @@ async def generate_scale(root_note: str, scale_type_id: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM dbo.fn_GenerateScale(?, ?)", root_note, scale_type_id)
-        
+        cursor.execute(
+            "SELECT * FROM dbo.fn_GenerateScale(?, ?)", root_note, scale_type_id
+        )
+
         scale_notes = []
         for row in cursor.fetchall():
-            scale_notes.append(ScaleNote(
-                DegreeNumber=row[0],
-                ScaleDegree=row[1],
-                Note=row[2],
-                SemitonesFromRoot=row[3],
-                IntervalName=row[4],
-                RomanNumeral=fix_unicode(row[5]),
-                ScaleName=row[6]
-            ))
-        
+            scale_notes.append(
+                ScaleNote(
+                    DegreeNumber=row[0],
+                    ScaleDegree=row[1],
+                    Note=row[2],
+                    SemitonesFromRoot=row[3],
+                    IntervalName=row[4],
+                    RomanNumeral=fix_unicode(row[5]),
+                    ScaleName=row[6],
+                )
+            )
+
         cursor.close()
         conn.close()
-        
+
         if not scale_notes:
-            raise HTTPException(status_code=404, detail=f"Scale not found for {root_note} with type {scale_type_id}")
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f"Scale not found for {root_note} with type {scale_type_id}",
+            )
+
         return scale_notes
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Chord/Arpeggio endpoints
 @app.get("/chords", response_model=List[ChordType], tags=["Chords"])
@@ -636,44 +720,55 @@ async def get_chord_types():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM dbo.ChordTypes ORDER BY ChordTypeId")
-        
+
         chords = []
         for row in cursor.fetchall():
-            chords.append(ChordType(
-                ChordTypeId=row[0],
-                ChordName=row[1],
-                ChordSymbol=row[2],
-                IntervalPattern=row[3],
-                Description=row[4]
-            ))
-        
+            chords.append(
+                ChordType(
+                    ChordTypeId=row[0],
+                    ChordName=row[1],
+                    ChordSymbol=row[2],
+                    IntervalPattern=row[3],
+                    Description=row[4],
+                )
+            )
+
         cursor.close()
         conn.close()
         return chords
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/chords/{chord_type_id}/extensions", response_model=List[ChordExtension], tags=["Chords"])
+
+@app.get(
+    "/chords/{chord_type_id}/extensions",
+    response_model=List[ChordExtension],
+    tags=["Chords"],
+)
 async def get_chord_extensions(chord_type_id: int, root_note: Optional[str] = None):
     """Get available Jazz extensions for a specific chord type, optionally with actual notes calculated from root"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT ExtensionId, ChordTypeId, ExtensionName, ExtensionSymbol, 
                    Semitones, Description, IsCommonInJazz, DisplayOrder
             FROM dbo.ChordExtensions
             WHERE ChordTypeId = ? AND IsCommonInJazz = 1
             ORDER BY DisplayOrder, Semitones
-        """, (chord_type_id,))
-        
+        """,
+            (chord_type_id,),
+        )
+
         extensions = []
         for row in cursor.fetchall():
             note = None
             if root_note:
                 # Calculate the actual note for this extension
                 note_cursor = conn.cursor()
-                note_cursor.execute("""
+                note_cursor.execute(
+                    """
                     SELECT TOP 1 NoteName
                     FROM dbo.Notes
                     WHERE SemitonesFromC = (
@@ -681,24 +776,28 @@ async def get_chord_extensions(chord_type_id: int, root_note: Optional[str] = No
                     ) % 12
                     AND (IsSharp = 1 OR IsNatural = 1)
                     ORDER BY IsNatural DESC, IsSharp DESC
-                """, (root_note, row[4]))  # row[4] is Semitones
+                """,
+                    (root_note, row[4]),
+                )  # row[4] is Semitones
                 note_row = note_cursor.fetchone()
                 if note_row:
                     note = note_row[0]
                 note_cursor.close()
-            
-            extensions.append(ChordExtension(
-                ExtensionId=row[0],
-                ChordTypeId=row[1],
-                ExtensionName=row[2],
-                ExtensionSymbol=row[3],
-                Semitones=row[4],
-                Description=row[5],
-                IsCommonInJazz=bool(row[6]),
-                DisplayOrder=row[7],
-                Note=note
-            ))
-        
+
+            extensions.append(
+                ChordExtension(
+                    ExtensionId=row[0],
+                    ChordTypeId=row[1],
+                    ExtensionName=row[2],
+                    ExtensionSymbol=row[3],
+                    Semitones=row[4],
+                    Description=row[5],
+                    IsCommonInJazz=bool(row[6]),
+                    DisplayOrder=row[7],
+                    Note=note,
+                )
+            )
+
         cursor.close()
         conn.close()
         return extensions
@@ -706,10 +805,14 @@ async def get_chord_extensions(chord_type_id: int, root_note: Optional[str] = No
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/arpeggios/{root_note}/{chord_type_id}", response_model=List[ArpeggioNote], tags=["Chords"])
+@app.get(
+    "/arpeggios/{root_note}/{chord_type_id}",
+    response_model=List[ArpeggioNote],
+    tags=["Chords"],
+)
 async def generate_arpeggio(root_note: str, chord_type_id: int):
     """Generate an arpeggio from a root note and chord type
-    
+
     Examples:
     - /arpeggios/C/5 - C Major 7
     - /arpeggios/D/6 - D Minor 7
@@ -721,39 +824,55 @@ async def generate_arpeggio(root_note: str, chord_type_id: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM dbo.fn_GenerateArpeggio(?, ?)", root_note, chord_type_id)
-        
+        cursor.execute(
+            "SELECT * FROM dbo.fn_GenerateArpeggio(?, ?)", root_note, chord_type_id
+        )
+
         arpeggio_notes = []
         for row in cursor.fetchall():
-            arpeggio_notes.append(ArpeggioNote(
-                NotePosition=row[0],
-                ChordTone=row[1],
-                Note=row[2],
-                SemitonesFromRoot=row[3],
-                IntervalName=row[4],
-                RomanNumeral=fix_unicode(row[5]),
-                ChordName=row[6],
-                ChordSymbol=row[7],
-                FullChordSymbol=row[8]
-            ))
-        
+            arpeggio_notes.append(
+                ArpeggioNote(
+                    NotePosition=row[0],
+                    ChordTone=row[1],
+                    Note=row[2],
+                    SemitonesFromRoot=row[3],
+                    IntervalName=row[4],
+                    RomanNumeral=fix_unicode(row[5]),
+                    ChordName=row[6],
+                    ChordSymbol=row[7],
+                    FullChordSymbol=row[8],
+                )
+            )
+
         cursor.close()
         conn.close()
-        
+
         if not arpeggio_notes:
-            raise HTTPException(status_code=404, detail=f"Arpeggio not found for {root_note} with type {chord_type_id}")
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f"Arpeggio not found for {root_note} with type {chord_type_id}",
+            )
+
         return arpeggio_notes
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # Circle of Fifths endpoints
-@app.get("/circle-of-fifths/keys", response_model=List[CircleOfFifthsKey], tags=["Circle of Fifths"])
-async def get_circle_of_fifths_keys(scale_type: Optional[int] = Query(None, description="Filter by scale type (1=Major, 2=Minor)")):
+@app.get(
+    "/circle-of-fifths/keys",
+    response_model=List[CircleOfFifthsKey],
+    tags=["Circle of Fifths"],
+)
+async def get_circle_of_fifths_keys(
+    scale_type: Optional[int] = Query(
+        None, description="Filter by scale type (1=Major, 2=Minor)"
+    )
+):
     """Get all keys in the Circle of Fifths with sharp/flat counts and relative keys
-    
+
     Examples:
     - /circle-of-fifths/keys - All major and minor keys
     - /circle-of-fifths/keys?scale_type=1 - Major keys only
@@ -762,7 +881,7 @@ async def get_circle_of_fifths_keys(scale_type: Optional[int] = Query(None, desc
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         if scale_type:
             query = """
                 SELECT KeySignatureId, RootNote, ScaleTypeId, ScaleName, PreferredAccidental, 
@@ -780,35 +899,42 @@ async def get_circle_of_fifths_keys(scale_type: Optional[int] = Query(None, desc
                 ORDER BY ScaleTypeId, CirclePosition
             """
             cursor.execute(query)
-        
+
         keys = []
         for row in cursor.fetchall():
-            keys.append(CircleOfFifthsKey(
-                KeySignatureId=row[0],
-                RootNote=row[1],
-                ScaleTypeId=row[2],
-                ScaleName=row[3],
-                PreferredAccidental=row[4],
-                Description=row[5],
-                AccidentalCount=row[6],
-                AccidentalType=row[7],
-                CirclePosition=row[8],
-                RelativeKey=row[9]
-            ))
-        
+            keys.append(
+                CircleOfFifthsKey(
+                    KeySignatureId=row[0],
+                    RootNote=row[1],
+                    ScaleTypeId=row[2],
+                    ScaleName=row[3],
+                    PreferredAccidental=row[4],
+                    Description=row[5],
+                    AccidentalCount=row[6],
+                    AccidentalType=row[7],
+                    CirclePosition=row[8],
+                    RelativeKey=row[9],
+                )
+            )
+
         cursor.close()
         conn.close()
         return keys
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/circle-of-fifths/progression/{key_note}", response_model=List[DiatonicChord], tags=["Circle of Fifths"])
+
+@app.get(
+    "/circle-of-fifths/progression/{key_note}",
+    response_model=List[DiatonicChord],
+    tags=["Circle of Fifths"],
+)
 async def get_chord_progression(
-    key_note: str, 
-    scale_type: int = Query(1, description="Scale type (1=Major, 2=Minor)")
+    key_note: str,
+    scale_type: int = Query(1, description="Scale type (1=Major, 2=Minor)"),
 ):
     """Get the diatonic chord progression for a key (I-ii-iii-IV-V-vi-vii° for major)
-    
+
     Examples:
     - /circle-of-fifths/progression/C?scale_type=1 - C Major: C, Dm, Em, F, G, Am, B°
     - /circle-of-fifths/progression/A?scale_type=2 - A Minor: Am, B°, C, Dm, Em, F, G
@@ -817,41 +943,52 @@ async def get_chord_progression(
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT ProgressionId, KeyNote, ScaleTypeId, DegreeNumber, DegreeRomanNumeral,
                    ChordRoot, ChordQuality, ChordSymbol, IntervalFromTonic, Description
             FROM dbo.DiatonicChordProgressions
             WHERE KeyNote = ? AND ScaleTypeId = ?
             ORDER BY DegreeNumber
-        """, key_note, scale_type)
-        
+        """,
+            key_note,
+            scale_type,
+        )
+
         chords = []
         for row in cursor.fetchall():
-            chords.append(DiatonicChord(
-                ProgressionId=row[0],
-                KeyNote=fix_unicode(row[1]),
-                ScaleTypeId=row[2],
-                DegreeNumber=row[3],
-                DegreeRomanNumeral=fix_unicode(row[4]),
-                ChordRoot=fix_unicode(row[5]),
-                ChordQuality=row[6],
-                ChordSymbol=fix_unicode(row[7]),
-                IntervalFromTonic=row[8],
-                Description=row[9]
-            ))
-        
+            chords.append(
+                DiatonicChord(
+                    ProgressionId=row[0],
+                    KeyNote=fix_unicode(row[1]),
+                    ScaleTypeId=row[2],
+                    DegreeNumber=row[3],
+                    DegreeRomanNumeral=fix_unicode(row[4]),
+                    ChordRoot=fix_unicode(row[5]),
+                    ChordQuality=row[6],
+                    ChordSymbol=fix_unicode(row[7]),
+                    IntervalFromTonic=row[8],
+                    Description=row[9],
+                )
+            )
+
         cursor.close()
         conn.close()
-        
+
         if not chords:
-            raise HTTPException(status_code=404, detail=f"Chord progression not found for {key_note} with scale type {scale_type}")
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chord progression not found for {key_note} with scale type {scale_type}",
+            )
+
         return chords
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

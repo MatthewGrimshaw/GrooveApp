@@ -14,16 +14,16 @@ describe('AppComponent', () => {
     expect(app).toBeTruthy();
   });
 
-  it(`should have the 'grooveapp-ui' title`, () => {
+  it(`should have the 'GrooveApp Music Theory' title`, () => {
     const fixture = TestBed.createComponent(AppComponent);
     const app = fixture.componentInstance;
-    expect(app.title).toEqual('grooveapp-ui');
+    expect(app.title).toEqual('GrooveApp Music Theory');
   });
 
   it('should render title', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, grooveapp-ui');
+    expect(compiled.querySelector('h1')?.textContent).toContain('GrooveApp Music Theory');
   });
 });

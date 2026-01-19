@@ -121,6 +121,7 @@ jobs:
       id-token: write
       contents: read
       pull-requests: write
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -163,7 +164,7 @@ jobs:
 
       - name: Upload tfsec SARIF
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('tfsec-results.sarif') != ''
         with:
           sarif_file: tfsec-results.sarif
 
@@ -178,7 +179,7 @@ jobs:
 
       - name: Upload Checkov SARIF
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('checkov-results.sarif') != ''
         with:
           sarif_file: checkov-results.sarif
 
