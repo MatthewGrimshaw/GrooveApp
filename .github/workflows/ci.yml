@@ -1,0 +1,745 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - "**" # Run on all branches
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  id-token: write # Required for OIDC authentication
+  contents: read # Required for checking out code
+  security-events: write # Required for CodeQL
+  pull-requests: write # Required for PR comments
+  checks: write # Required for test reporting
+
+env:
+  TERRAFORM_VERSION: "1.6.0"
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # ============================================================================
+  # SECURITY SCANNING - Runs first to catch issues early
+  # ============================================================================
+
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better detection
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: GitLeaks Secret Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  codeql-analysis:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "javascript"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+
+  dependency-scanning:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Python Dependency Scan (Safety)
+        run: |
+          pip install safety
+          safety check --file api/requirements.txt --output json --save-json safety-report.json || true
+
+      - name: Python Dependency Scan (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit -r api/requirements.txt --format json --output pip-audit-report.json || true
+
+      - name: NPM Audit
+        working-directory: app
+        run: |
+          npm audit --json > npm-audit-report.json || true
+          npm audit --audit-level=high
+
+      - name: Upload Dependency Scan Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-scan-results
+          path: |
+            safety-report.json
+            pip-audit-report.json
+            app/npm-audit-report.json
+
+  # ============================================================================
+  # TERRAFORM VALIDATION & SECURITY
+  # ============================================================================
+
+  terraform-validate:
+    name: Terraform Validation & Security
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        run: |
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint --format compact --recursive
+
+      - name: Terraform Security Scan (tfsec)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra/terraform
+          soft_fail: true
+          format: sarif
+          sarif_file: tfsec-results.sarif
+
+      - name: Upload tfsec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: tfsec-results.sarif
+
+      - name: Checkov Terraform Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra/terraform
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ============================================================================
+  # TERRAFORM PLAN - STAGING ENVIRONMENT
+  # ============================================================================
+
+  terraform-plan-staging:
+    name: Terraform Plan - Staging
+    runs-on: ubuntu-latest
+    needs: [terraform-validate]
+    environment: Staging
+    defaults:
+      run:
+        working-directory: infra/terraform
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init - Staging
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}" \
+            -backend-config="key=grooveapp-staging.tfstate" \
+            -backend-config="resource_group_name=${{ secrets.AZURE_RESOURCE_GROUP_NAME }}"
+
+      - name: Terraform Plan - Staging
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="environments/staging.tfvars" \
+            -out=tfplan-staging \
+            -no-color
+        continue-on-error: true
+
+      - name: Terraform Show - Staging
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform show -no-color tfplan-staging > plan-output-staging.txt
+          cat plan-output-staging.txt
+
+      - name: Generate Plan Summary - Staging
+        if: steps.plan.outcome == 'success'
+        run: |
+          echo "## Terraform Plan Summary - Staging" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`terraform" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan-staging | head -100 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Plan - Staging
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-staging
+          path: |
+            infra/terraform/tfplan-staging
+            infra/terraform/plan-output-staging.txt
+          retention-days: 30
+
+      - name: Post Terraform Status - Staging
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const plan = '${{ steps.plan.outcome }}';
+            let planSummary = '';
+            if (plan === 'success') {
+              const fs = require('fs');
+              try {
+                const planOutput = fs.readFileSync('infra/terraform/plan-output-staging.txt', 'utf8');
+                const lines = planOutput.split('\n');
+                const summary = lines.slice(0, 50).join('\n');
+                planSummary = `\n\n#### Terraform Plan (Staging):\n\`\`\`terraform\n${summary}\n...\n\`\`\`\n\n<details><summary>Full Plan Output</summary>\n\n\`\`\`terraform\n${planOutput}\n\`\`\`\n</details>`;
+              } catch (e) {
+                planSummary = '\n\n#### Terraform Plan: Output not available';
+              }
+            }
+
+            const body = `### Terraform Plan - Staging Environment
+            #### Status: \`${plan}\`${planSummary}
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================================
+  # TERRAFORM PLAN - PRODUCTION ENVIRONMENT
+  # ============================================================================
+
+  terraform-plan-production:
+    name: Terraform Plan - Production
+    runs-on: ubuntu-latest
+    needs: [terraform-validate]
+    environment: Production
+    defaults:
+      run:
+        working-directory: infra/terraform
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init - Production
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}" \
+            -backend-config="key=grooveapp-prod.tfstate" \
+            -backend-config="resource_group_name=${{ secrets.AZURE_RESOURCE_GROUP_NAME }}"
+
+      - name: Terraform Plan - Production
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="environments/prod.tfvars" \
+            -out=tfplan-prod \
+            -no-color
+        continue-on-error: true
+
+      - name: Terraform Show - Production
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform show -no-color tfplan-prod > plan-output-prod.txt
+          cat plan-output-prod.txt
+
+      - name: Generate Plan Summary - Production
+        if: steps.plan.outcome == 'success'
+        run: |
+          echo "## Terraform Plan Summary - Production" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`terraform" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan-prod | head -100 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Plan - Production
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-production
+          path: |
+            infra/terraform/tfplan-prod
+            infra/terraform/plan-output-prod.txt
+          retention-days: 30
+
+      - name: Post Terraform Status - Production
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const plan = '${{ steps.plan.outcome }}';
+            let planSummary = '';
+            if (plan === 'success') {
+              const fs = require('fs');
+              try {
+                const planOutput = fs.readFileSync('infra/terraform/plan-output-prod.txt', 'utf8');
+                const lines = planOutput.split('\n');
+                const summary = lines.slice(0, 50).join('\n');
+                planSummary = `\n\n#### Terraform Plan (Production):\n\`\`\`terraform\n${summary}\n...\n\`\`\`\n\n<details><summary>Full Plan Output</summary>\n\n\`\`\`terraform\n${planOutput}\n\`\`\`\n</details>`;
+              } catch (e) {
+                planSummary = '\n\n#### Terraform Plan: Output not available';
+              }
+            }
+
+            const body = `### Terraform Plan - Production Environment
+            #### Status: \`${plan}\`${planSummary}
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================================
+  # PYTHON API TESTS
+  # ============================================================================
+
+  python-tests:
+    name: Python API Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-xdist pytest-timeout
+
+      - name: Run Unit Tests with Coverage
+        run: |
+          pytest -v \
+            --cov=. \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --junitxml=junit.xml \
+            --maxfail=1 \
+            --tb=short \
+            -n auto \
+            || exit 1
+
+      - name: Check Coverage Threshold
+        run: |
+          coverage=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(float(root.attrib['line-rate']) * 100)")
+          echo "Coverage: $coverage%"
+          if (( $(echo "$coverage < 70" | bc -l) )); then
+            echo "::error::Coverage $coverage% is below 70% threshold"
+            exit 1
+          fi
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./api/coverage.xml
+          flags: api
+          name: api-coverage
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-test-results
+          path: |
+            api/junit.xml
+            api/coverage.xml
+            api/htmlcov/
+
+  python-lint:
+    name: Python Linting & SAST
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: |
+          pip install flake8 pylint bandit black isort mypy
+
+      - name: Black Format Check
+        run: black --check .
+
+      - name: isort Import Check
+        run: isort --check-only .
+
+      - name: Flake8
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Pylint
+        run: pylint **/*.py --exit-zero --output-format=parseable > pylint-report.txt
+
+      - name: Bandit Security Scan
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -ll  # Fail on high severity issues
+
+      - name: MyPy Type Checking
+        run: mypy . --ignore-missing-imports --no-strict-optional || true
+
+      - name: Upload Lint Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-lint-results
+          path: |
+            api/pylint-report.txt
+            api/bandit-report.json
+
+  # ============================================================================
+  # ANGULAR FRONTEND TESTS
+  # ============================================================================
+
+  angular-tests:
+    name: Angular Frontend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Unit Tests
+        run: npm run test -- --no-watch --code-coverage --browsers=ChromeHeadless
+
+      - name: Check Coverage Threshold
+        run: |
+          coverage=$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('coverage/grooveapp/coverage-summary.json')); console.log(data.total.lines.pct)")
+          echo "Coverage: $coverage%"
+          if (( $(echo "$coverage < 70" | bc -l) )); then
+            echo "::error::Coverage $coverage% is below 70% threshold"
+            exit 1
+          fi
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./app/coverage/grooveapp/lcov.info
+          flags: frontend
+          name: frontend-coverage
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: angular-test-results
+          path: |
+            app/coverage/
+            app/test-results/
+
+  angular-lint:
+    name: Angular Linting & SAST
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npx ng lint --format=json > eslint-report.json || true
+
+      - name: Upload Lint Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: angular-lint-results
+          path: app/eslint-report.json
+
+  # ============================================================================
+  # DOCKER IMAGE SCANNING
+  # ============================================================================
+
+  docker-scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    needs: [python-tests, angular-tests]
+    strategy:
+      matrix:
+        image: [api, app]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        working-directory: ${{ matrix.image }}
+        run: |
+          docker build -t grooveapp-${{ matrix.image }}:test .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "grooveapp-${{ matrix.image }}:test"
+          format: "sarif"
+          output: "trivy-${{ matrix.image }}-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-${{ matrix.image }}-results.sarif"
+
+      - name: Run Trivy in Table Mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "grooveapp-${{ matrix.image }}:test"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
+
+  # ============================================================================
+  # QUALITY GATES
+  # ============================================================================
+
+  quality-gate:
+    name: Quality Gate Check
+    runs-on: ubuntu-latest
+    needs:
+      - secret-scanning
+      - codeql-analysis
+      - dependency-scanning
+      - terraform-validate
+      - terraform-plan-staging
+      - terraform-plan-production
+      - python-tests
+      - python-lint
+      - angular-tests
+      - angular-lint
+      - docker-scan
+    if: always()
+    steps:
+      - name: Check Quality Gates
+        run: |
+          echo "Checking all quality gates..."
+
+          # Check if any critical job failed
+          if [[ "${{ needs.secret-scanning.result }}" == "failure" ]]; then
+            echo "::error::Secret scanning failed - critical security issue"
+            exit 1
+          fi
+
+          if [[ "${{ needs.codeql-analysis.result }}" == "failure" ]]; then
+            echo "::error::CodeQL analysis failed - critical security issue"
+            exit 1
+          fi
+
+          if [[ "${{ needs.python-tests.result }}" == "failure" ]]; then
+            echo "::error::Python tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.angular-tests.result }}" == "failure" ]]; then
+            echo "::error::Angular tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.docker-scan.result }}" == "failure" ]]; then
+            echo "::error::Docker security scan found critical vulnerabilities"
+            exit 1
+          fi
+
+          echo "✅ All quality gates passed!"
+
+      - name: Post Quality Gate Status
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? '✅ PASSED' : '❌ FAILED';
+            const body = `## Quality Gate Status: ${status}
+
+            | Check | Status |
+            |-------|--------|
+            | Secret Scanning | ${{ needs.secret-scanning.result }} |
+            | CodeQL Analysis | ${{ needs.codeql-analysis.result }} |
+            | Dependency Scanning | ${{ needs.dependency-scanning.result }} |
+            | Terraform Validation | ${{ needs.terraform-validate.result }} |
+            | Terraform Plan - Staging | ${{ needs.terraform-plan-staging.result }} |
+            | Terraform Plan - Production | ${{ needs.terraform-plan-production.result }} |
+            | Python Tests | ${{ needs.python-tests.result }} |
+            | Python Lint | ${{ needs.python-lint.result }} |
+            | Angular Tests | ${{ needs.angular-tests.result }} |
+            | Angular Lint | ${{ needs.angular-lint.result }} |
+            | Docker Security Scan | ${{ needs.docker-scan.result }} |
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================================
+  # SUMMARY REPORT
+  # ============================================================================
+
+  pipeline-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs:
+      - quality-gate
+    if: always()
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Event:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Quality Gate | ${{ needs.quality-gate.result }} |" >> $GITHUB_STEP_SUMMARY
