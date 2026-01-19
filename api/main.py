@@ -993,4 +993,5 @@ async def get_chord_progression(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # nosec B104 - Binding to all interfaces is intentional for containerized API
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # nosec
