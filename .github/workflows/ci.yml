@@ -165,6 +165,7 @@ jobs:
           soft_fail: true
           format: sarif
           sarif_file: tfsec-results.sarif
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload tfsec SARIF
         uses: github/codeql-action/upload-sarif@v4
