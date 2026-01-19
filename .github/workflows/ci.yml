@@ -666,22 +666,25 @@ jobs:
     steps:
       - name: Check Quality Gates
         run: |
-          echo "## Quality Gate Status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Secret Scanning | ${{ needs.secret-scanning.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| CodeQL Analysis | ${{ needs.codeql-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dependency Scanning | ${{ needs.dependency-scanning.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Terraform Validation | ${{ needs.terraform-validate.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Terraform Plan - Staging | ${{ needs.terraform-plan-staging.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Terraform Plan - Production | ${{ needs.terraform-plan-production.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Python Lint | ${{ needs.python-lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Angular Tests | ${{ needs.angular-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Angular Lint | ${{ needs.angular-lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Security Scan | ${{ needs.docker-scan.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          # Write summary header
+          {
+            echo "## Quality Gate Status"
+            echo ""
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            echo "| Secret Scanning | ${{ needs.secret-scanning.result }} |"
+            echo "| CodeQL Analysis | ${{ needs.codeql-analysis.result }} |"
+            echo "| Dependency Scanning | ${{ needs.dependency-scanning.result }} |"
+            echo "| Terraform Validation | ${{ needs.terraform-validate.result }} |"
+            echo "| Terraform Plan - Staging | ${{ needs.terraform-plan-staging.result }} |"
+            echo "| Terraform Plan - Production | ${{ needs.terraform-plan-production.result }} |"
+            echo "| Python Tests | ${{ needs.python-tests.result }} |"
+            echo "| Python Lint | ${{ needs.python-lint.result }} |"
+            echo "| Angular Tests | ${{ needs.angular-tests.result }} |"
+            echo "| Angular Lint | ${{ needs.angular-lint.result }} |"
+            echo "| Docker Security Scan | ${{ needs.docker-scan.result }} |"
+            echo ""
+          } >> $GITHUB_STEP_SUMMARY
 
           # Check if any critical job failed
           FAILED=0
