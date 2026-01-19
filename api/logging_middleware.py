@@ -2,13 +2,14 @@
 FastAPI middleware for request/response logging and tracing
 """
 
+import logging
 import time
 import uuid
 from typing import Callable
+
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
-import logging
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

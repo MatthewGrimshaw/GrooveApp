@@ -2,9 +2,10 @@
 Basic health check tests for the API
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def client(mock_db_connection):
 
 def test_health_endpoint(client):
     """Test the health check endpoint"""
-    response = client.get("/api/health")
+    response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert "status" in data

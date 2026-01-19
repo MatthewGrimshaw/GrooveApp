@@ -4,9 +4,10 @@ Supports both local development and Azure Application Insights
 """
 
 import logging
-import sys
 import os
+import sys
 from typing import Optional
+
 from azure.monitor.opentelemetry import configure_azure_monitor
 
 

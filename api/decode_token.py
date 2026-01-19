@@ -1,6 +1,6 @@
-import os
 import base64
 import json
+import os
 
 token = os.environ.get("AZURE_ACCESS_TOKEN", "")
 if not token:

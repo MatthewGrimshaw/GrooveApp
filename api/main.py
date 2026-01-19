@@ -3,21 +3,23 @@ GrooveApp Music Theory API
 FastAPI application for querying music theory data from Azure SQL Database
 """
 
+import json
+import os
+import shutil
+import struct
+import subprocess
+from typing import List, Optional
+
+import pyodbc
+from azure.identity import DefaultAzureCredential
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
-import pyodbc
-import os
-import subprocess
-import json
-import shutil
 from pydantic import BaseModel
-from azure.identity import DefaultAzureCredential
-import struct
 
 # Import logging configuration
 from logging_config import configure_logging, create_audit_log
-from logging_middleware import RequestLoggingMiddleware, DatabaseLoggingMiddleware
+from logging_middleware import (DatabaseLoggingMiddleware,
+                                RequestLoggingMiddleware)
 
 # Initialize logger
 LOG_LEVEL = os.getenv(
@@ -316,7 +318,8 @@ def get_db_connection(timeout_seconds=30):
                     # Parse the token to determine which principal failed to authenticate
                     principal_info = "the web app's managed identity"
                     try:
-                        import base64, json
+                        import base64
+                        import json
 
                         token_parts = access_token.split(".")
                         if len(token_parts) >= 2:
