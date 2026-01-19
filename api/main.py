@@ -18,8 +18,7 @@ from pydantic import BaseModel
 
 # Import logging configuration
 from logging_config import configure_logging, create_audit_log
-from logging_middleware import (DatabaseLoggingMiddleware,
-                                RequestLoggingMiddleware)
+from logging_middleware import DatabaseLoggingMiddleware, RequestLoggingMiddleware
 
 # Initialize logger
 LOG_LEVEL = os.getenv(
