@@ -14,10 +14,10 @@ import pyodbc
 from azure.identity import DefaultAzureCredential
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 # Import logging configuration
 from logging_config import configure_logging, create_audit_log
-from logging_middleware import (DatabaseLoggingMiddleware,
-                                RequestLoggingMiddleware)
+from logging_middleware import DatabaseLoggingMiddleware, RequestLoggingMiddleware
 from pydantic import BaseModel
 
 # Initialize logger
