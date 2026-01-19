@@ -1,0 +1,4 @@
+.terraform/
+*.tfstate*
+terraform-azurerm-naming
+.terraform.lock.hcl
