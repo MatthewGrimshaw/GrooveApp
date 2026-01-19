@@ -9,13 +9,13 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Security: Run npm audit and fail on high/critical vulnerabilities
-# This can be disabled during development by setting SKIP_AUDIT build arg
+# Security: Run npm audit on all dependencies (including dev) and fail on critical vulnerabilities
+# Known issue: tar vulnerability in @angular/cli (requires Angular 21 upgrade - breaking change)
 ARG SKIP_AUDIT=false
 RUN if [ "$SKIP_AUDIT" = "false" ]; then \
-  echo "Running npm audit..."; \
-  npm audit --audit-level=high || { \
-  echo "❌ Security vulnerabilities found! Run 'npm audit fix' or set --build-arg SKIP_AUDIT=true"; \
+  echo "Running npm audit (all dependencies)..."; \
+  npm audit --audit-level=critical || { \
+  echo "❌ Critical security vulnerabilities found! Run 'npm audit fix' or set --build-arg SKIP_AUDIT=true"; \
   exit 1; \
   }; \
   else \
